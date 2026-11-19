@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.CLNS-KR/grnt",
   "title": "GRNT — Korean Grant & Subsidy Intelligence",
-  "description": "Grants, simplified. Korea personal-benefit and startup/SME grant eligibility from official public data: Gov24 condition codes (age, gender, income bracket, life stage, household) plus K-Startup and Bizinfo announcement requirements (business age, target, region, industry). Returns reasons, missing information, and source attribution.",
+  "description": "Korean grant and startup-funding eligibility checks with official reasons and sources.",
   "version": "0.2.0",
   "websiteUrl": "https://grnt.onrender.com/",
   "repository": {

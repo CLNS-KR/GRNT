@@ -45,6 +45,16 @@ class ServerJsonTest(unittest.TestCase):
         self.assertEqual(self.manifest["remotes"][0]["type"], "streamable-http")
         self.assertTrue(self.manifest["remotes"][0]["url"].endswith("/mcp"))
 
+    def test_registry_manifest_fits_publisher_schema(self):
+        """공식 레지스트리 스키마(2025-12-11)의 제한 — 넘기면 mcp-publisher 가 거부한다."""
+        description = self.manifest["description"]
+        self.assertGreaterEqual(len(description), 1)
+        self.assertLessEqual(len(description), 100, "description maxLength=100")
+        self.assertRegex(self.manifest["name"], r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+$")
+        self.assertLessEqual(len(self.manifest["name"]), 200)
+        self.assertTrue(self.manifest["websiteUrl"].startswith("https://"))
+        self.assertTrue(self.manifest["remotes"][0]["url"].startswith("https://"))
+
     def test_registry_name_matches_repository(self):
         self.assertEqual(self.manifest["name"], "io.github.CLNS-KR/grnt")
         self.assertEqual(self.manifest["repository"]["url"],
