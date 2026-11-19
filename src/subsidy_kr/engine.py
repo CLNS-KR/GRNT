@@ -1145,11 +1145,11 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
 def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
            include_ineligible: bool = False, tag: Optional[str] = None,
            keyword: Optional[str] = None, max_scan: int = 20000,
-           include_closed: bool = False) -> Dict[str, Any]:
+           include_closed: bool = False, balance_kinds: bool = False) -> Dict[str, Any]:
     """프로필로 후보 제도를 판정한다. 트랙·지역·마감 여부로 후보를 줄인 뒤 판정한다."""
     cache = _result_cache(catalog)
     cache_key = (profile_key(profile), int(limit), bool(include_ineligible),
-                 tag or "", keyword or "", int(max_scan), bool(include_closed))
+                 tag or "", keyword or "", int(max_scan), bool(include_closed), bool(balance_kinds))
     hit = cache.get(cache_key)
     if hit is not None:
         return _copy_result(hit)
@@ -1171,10 +1171,25 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     for row in results:
         track_counts[row["track"]] = track_counts.get(row["track"], 0) + 1
 
+    cap = max(1, limit)
+    if balance_kinds:
+        grants = [r for r in shown if r.get("benefit_kind") != "program"]
+        progs = [r for r in shown if r.get("benefit_kind") == "program"]
+        if grants and progs and cap >= 4:
+            p_quota = min(len(progs), max(1, cap // 3))
+            g_quota = min(len(grants), cap - p_quota)
+            if g_quota + p_quota < cap:
+                p_quota = min(len(progs), cap - g_quota)
+            picked = grants[:g_quota] + progs[:p_quota]
+        else:
+            picked = shown[:cap]
+    else:
+        picked = shown[:cap]
+
     result = {
         "counts": counts,
         "scanned": len(results),
-        "results": shown[:max(1, limit)],
+        "results": picked,
         "truncated": len(shown) > limit,
         "ineligible_hidden": (counts[models.VERDICT_INELIGIBLE]
                               if not include_ineligible else 0),

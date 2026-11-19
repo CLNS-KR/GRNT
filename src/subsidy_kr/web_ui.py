@@ -554,16 +554,17 @@ PAGE_TEMPLATE = """<!doctype html>
     // 이전 동적 필터 바 정리
     document.querySelectorAll('.sub-bar-dyn').forEach(function(elNode){{ elNode.remove(); }});
 
-    // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램 vs 전체)
+    // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램) 딱 2개
     var grantCnt = allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
     var progCnt = allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
-    if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'all'; }}
+    if (activeKind !== 'grant' && activeKind !== 'program') {{ activeKind = 'grant'; }}
+    if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'program'; }}
+    if (activeKind === 'program' && progCnt === 0 && grantCnt > 0) {{ activeKind = 'grant'; }}
     var kindTabs = [
       ['grant', '지원금·바우처'],
-      ['program', '교육·건강·프로그램'],
-      ['all', '전체 보기']
+      ['program', '교육·건강·프로그램']
     ];
-    var kindCounts = {{ grant: grantCnt, program: progCnt, all: allRows.length }};
+    var kindCounts = {{ grant: grantCnt, program: progCnt }};
     kindTabs.forEach(function(pair){{
       var k = pair[0], label = pair[1];
       var kbtn = document.createElement('button');
@@ -580,15 +581,15 @@ PAGE_TEMPLATE = """<!doctype html>
       counts.appendChild(kbtn);
     }});
 
-    // 현재 선택된 큰 분류에 해당하는 행들 기준으로 판정·분야 건수 계산
+    // 1단 필터 적용
     var kindRows = allRows.filter(function(r){{
-      if (activeKind === 'grant') return r.benefit_kind !== 'program';
-      if (activeKind === 'program') return r.benefit_kind === 'program';
-      return true;
+      return activeKind === 'program'
+        ? r.benefit_kind === 'program'
+        : r.benefit_kind !== 'program';
     }});
 
     var labels = {{
-      all: '전체 판정',
+      all: '전체',
       eligible_likely: '받을 가능성 높음',
       check_needed: '조건 확인 필요',
       insufficient_info: '정보 부족'
@@ -610,9 +611,16 @@ PAGE_TEMPLATE = """<!doctype html>
       btn.textContent = labels[code] + ' ' + cnt + '건';
       btn.addEventListener('click', function(){{
         activeFilter = code;
+        activeField = 'all';
         renderResults(lastData);
       }});
       verdictBar.appendChild(btn);
+    }});
+
+    // 2단(판정)까지 통과한 행 기준으로 3단(분야) 건수 계산
+    var verdictRows = kindRows.filter(function(r){{
+      if (activeFilter === 'all') return true;
+      return r.verdict && r.verdict.code === activeFilter;
     }});
 
     function fieldBucket(row){{
@@ -628,7 +636,7 @@ PAGE_TEMPLATE = """<!doctype html>
     }}
     var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
     var fieldCounts = {{}};
-    kindRows.forEach(function(r){{
+    verdictRows.forEach(function(r){{
       var b = fieldBucket(r);
       fieldCounts[b] = (fieldCounts[b] || 0) + 1;
     }});
@@ -638,7 +646,7 @@ PAGE_TEMPLATE = """<!doctype html>
     var fAllBtn = document.createElement('button');
     fAllBtn.type = 'button';
     fAllBtn.className = activeField === 'all' ? 'active' : '';
-    fAllBtn.textContent = '전체 분야 ' + kindRows.length + '건';
+    fAllBtn.textContent = '전체 분야 ' + verdictRows.length + '건';
     fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
     fieldBar.appendChild(fAllBtn);
     fieldOrder.forEach(function(fb){{
@@ -667,10 +675,9 @@ PAGE_TEMPLATE = """<!doctype html>
       box.appendChild(notice);
     }}
 
-    var rows = kindRows.filter(function(r){{
+    var rows = verdictRows.filter(function(r){{
       if (activeField !== 'all' && fieldBucket(r) !== activeField) return false;
-      if (activeFilter === 'all') return true;
-      return r.verdict && r.verdict.code === activeFilter;
+      return true;
     }});
     if (!rows.length) {{
       box.appendChild(el('div', 'empty',
@@ -842,6 +849,7 @@ PAGE_TEMPLATE = """<!doctype html>
     var payload = {{
       profile: buildProfile(),
       limit: 200,
+      balance_kinds: true,
       include_closed: !!(includeClosedEl && includeClosedEl.checked)
     }};
     if (kwEl && kwEl.value.trim()) {{

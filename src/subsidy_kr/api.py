@@ -116,6 +116,7 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         include_closed=bool(args.get("include_closed")),
         tag=str(args.get("tag") or "").strip() or None,
         keyword=str(args.get("keyword") or "").strip() or None,
+        balance_kinds=bool(args.get("balance_kinds")),
     )
     region_info = profile.get("region") or {}
     payload: Dict[str, Any] = {
