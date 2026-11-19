@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from . import conditions, engine, models, programs, regions, snapshots, usage
+from . import conditions, engine, local_portals, models, programs, regions, snapshots, usage
 from .catalog import Catalog
 
 SCHEMA_VERSION = "1.1"
@@ -117,6 +117,7 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         tag=str(args.get("tag") or "").strip() or None,
         keyword=str(args.get("keyword") or "").strip() or None,
     )
+    region_info = profile.get("region") or {}
     payload: Dict[str, Any] = {
         "profile": engine.explain_profile(profile),
         "track": result["track"],
@@ -126,6 +127,9 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         "truncated": result["truncated"],
         "ineligible_hidden": result["ineligible_hidden"],
         "closed_hidden": result["closed_hidden"],
+        "local_portal_status": local_portals.coverage_status(
+            region_info.get("sido"), region_info.get("sigungu")
+        ),
         "results": [_result_row(row) for row in result["results"]],
         "next_questions": profile["missing_core"],
         "scope_limits_ko": SCOPE_LIMITS_KO,

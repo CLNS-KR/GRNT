@@ -100,6 +100,14 @@ def normalize_profile(raw: Optional[Dict[str, Any]], today: Optional[date] = Non
     region_raw = raw.get("region")
     if isinstance(region_raw, dict):
         sido, sigungu = region_raw.get("sido"), region_raw.get("sigungu")
+    elif isinstance(region_raw, str) and region_raw.strip():
+        parsed_reg = regions.parse_agency_region(region_raw.strip())
+        sido = raw.get("sido") or parsed_reg.get("sido")
+        sigungu = raw.get("sigungu") or parsed_reg.get("sigungu")
+        if not sido and not sigungu:
+            parts = region_raw.strip().split(None, 1)
+            sido = parts[0]
+            sigungu = parts[1] if len(parts) > 1 else None
     else:
         sido, sigungu = raw.get("sido"), raw.get("sigungu")
     region = regions.region_block(sido, sigungu)
@@ -976,8 +984,7 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
         # 트랙을 고르지 않았고 사업자 조건도 없으면 개인 제도만 보여 준다.
         pool = [svc for svc in pool if not svc.is_business]
     if not include_closed:
-        pool = [svc for svc in pool
-                if not (svc.is_business and svc.business.get("recruiting") == "closed")]
+        pool = [svc for svc in pool if not svc.is_expired]
     if tag:
         pool = [svc for svc in pool if tag in svc.tags]
     if keyword:
@@ -1031,7 +1038,8 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
                               if not include_ineligible else 0),
         "track": track,
         "track_counts": track_counts,
-        "closed_hidden": catalog.closed_business_count if not include_closed else 0,
+        "closed_hidden": getattr(catalog, "expired_count", catalog.closed_business_count)
+        if not include_closed else 0,
     }
     cache.put(cache_key, result, len(result["results"]))
     return _copy_result(result)

@@ -44,8 +44,7 @@ def reference_search(catalog, profile, *, limit=20, include_ineligible=False, ta
     elif not (profile.get("business") or {}).get("declared"):
         pool = [svc for svc in pool if not svc.is_business]
     if not include_closed:
-        pool = [svc for svc in pool
-                if not (svc.is_business and svc.business.get("recruiting") == "closed")]
+        pool = [svc for svc in pool if not svc.is_expired]
     if tag:
         pool = [svc for svc in pool if tag in svc.tags]
     if keyword:
@@ -75,8 +74,7 @@ def reference_search(catalog, profile, *, limit=20, include_ineligible=False, ta
         "ineligible_hidden": counts[models.VERDICT_INELIGIBLE] if not include_ineligible else 0,
         "track": track,
         "track_counts": track_counts,
-        "closed_hidden": sum(1 for svc in catalog.services
-                             if svc.is_business and svc.business.get("recruiting") == "closed")
+        "closed_hidden": sum(1 for svc in catalog.services if svc.is_expired)
         if not include_closed else 0,
     }
 

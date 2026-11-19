@@ -513,9 +513,22 @@ PAGE_TEMPLATE = """<!doctype html>
       counts.appendChild(chip);
     }});
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
+    var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
     document.getElementById('results-sub').textContent =
-      trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다. ' +
+      trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다' + hiddenNote + '. ' +
       '카드의 사유와 원문을 함께 확인하세요.';
+
+    var portalStatus = result.local_portal_status || null;
+    if (portalStatus && portalStatus.supported === false && portalStatus.notice_ko) {{
+      var notice = el('div', 'empty');
+      notice.style.background = '#fff8e1';
+      notice.style.border = '1px solid #f59e0b';
+      notice.style.color = '#78350f';
+      notice.style.marginBottom = '14px';
+      notice.style.textAlign = 'left';
+      notice.textContent = '미연동 지역 안내: ' + portalStatus.notice_ko;
+      box.appendChild(notice);
+    }}
 
     var rows = result.results || [];
     if (!rows.length) {{
