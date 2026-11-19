@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.env
+.private-terms
+
+# 동기화 산출물·캐시는 커밋하지 않는다.
+#   catalog.json 25MB · snapshots 9MB/일 · cache 101MB 이고, 공고문 원문에 기관 담당자
+#   이메일·전화가 그대로 들어 있다. 실데이터는 sync_gov24 로 각 환경에서 만든다.
+data/gov24/*
+!data/gov24/.gitkeep
+
+data/app.sqlite
+data/app.sqlite-shm
+data/app.sqlite-wal
+
+build/*.geojson
+build/regions_out/
+.DS_Store

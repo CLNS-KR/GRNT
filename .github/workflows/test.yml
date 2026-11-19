@@ -1,0 +1,51 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run tests (no API key needed)
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s src/tests -v
+      - name: Smoke run server
+        env:
+          PYTHONPATH: src
+          PORT: "8787"
+        run: |
+          python -m subsidy_kr.server &
+          for i in $(seq 1 20); do
+            if python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=2)"; then
+              break
+            fi
+            sleep 1
+          done
+          python - <<'PY'
+          import json, urllib.request
+          def get(path):
+              with urllib.request.urlopen(f"http://127.0.0.1:8787{path}", timeout=5) as r:
+                  return r.status, r.read()
+          status, _ = get("/healthz")
+          assert status == 200
+          status, body = get("/v1/mcp")
+          assert len(json.loads(body)["tools"]) == 7
+          request = urllib.request.Request(
+              "http://127.0.0.1:8787/mcp",
+              data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
+              headers={"Content-Type": "application/json"}, method="POST")
+          with urllib.request.urlopen(request, timeout=5) as response:
+              assert len(json.loads(response.read())["result"]["tools"]) == 7
+          print("smoke ok")
+          PY

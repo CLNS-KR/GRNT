@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+.private-terms
+build
+**/__pycache__
+**/*.pyc
+src/tests
+data/app.sqlite*
+data/gov24/cache
