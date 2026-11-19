@@ -116,8 +116,9 @@ details p{margin:6px 0 0}
 .foot{margin-top:22px;font-size:12px;color:var(--ink-soft);line-height:1.7}
 .foot a{color:var(--ink-soft)}
 .counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
-.counts span{font-size:12.5px;font-weight:700;padding:5px 10px;border-radius:999px;
-  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft)}
+.counts button{font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;
+  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer;font-family:inherit}
+.counts button.active{background:var(--brand);border-color:var(--brand);color:#fff}
 .track{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
 .track label{position:relative;flex:1 1 200px}
 .track input{position:absolute;opacity:0;width:1px;height:1px}
@@ -372,6 +373,12 @@ PAGE_TEMPLATE = """<!doctype html>
           </label>
         </div>
 
+        <div style="margin-top:12px">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink-soft);cursor:pointer">
+            <input type="checkbox" id="include_closed"> 지난(마감) 공고도 포함해서 보기
+          </label>
+        </div>
+
         <div class="actions">
           <button class="primary" type="submit" id="run">내 지원금 확인하기</button>
           <button class="ghost" type="button" id="fill-demo">예시로 채워 보기</button>
@@ -498,25 +505,48 @@ PAGE_TEMPLATE = """<!doctype html>
     return node;
   }}
 
+  var activeFilter = 'all';
+  var lastData = null;
+
   function renderResults(data){{
+    lastData = data;
     var result = data.result || {{}};
     var card = document.getElementById('results-card');
     var box = document.getElementById('results');
     var counts = document.getElementById('counts');
     box.innerHTML = ''; counts.innerHTML = '';
     card.hidden = false;
-    var labels = {{eligible_likely:'받을 가능성 높음', check_needed:'조건 확인 필요',
-      insufficient_info:'정보 부족', ineligible:'해당 없음'}};
-    Object.keys(labels).forEach(function(code){{
-      var value = (result.counts || {{}})[code] || 0;
-      var chip = el('span', null, labels[code] + ' ' + value + '건');
-      counts.appendChild(chip);
+
+    var allRows = result.results || [];
+    var labels = {{
+      all: '전체',
+      eligible_likely: '받을 가능성 높음',
+      check_needed: '조건 확인 필요',
+      insufficient_info: '정보 부족'
+    }};
+    var rowCounts = {{all: allRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0}};
+    allRows.forEach(function(r){{
+      var c = r.verdict && r.verdict.code;
+      if (rowCounts[c] !== undefined) {{ rowCounts[c] += 1; }}
     }});
+    Object.keys(labels).forEach(function(code){{
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = activeFilter === code ? 'active' : '';
+      var cnt = code === 'all' ? allRows.length : ((result.counts || {{}})[code] || rowCounts[code] || 0);
+      btn.textContent = labels[code] + ' ' + cnt + '건';
+      btn.addEventListener('click', function(){{
+        activeFilter = code;
+        renderResults(lastData);
+      }});
+      counts.appendChild(btn);
+    }});
+
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
     var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
     document.getElementById('results-sub').textContent =
       trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다' + hiddenNote + '. ' +
-      '카드의 사유와 원문을 함께 확인하세요.';
+      '위 탭을 눌러 판정별로 골라 볼 수 있습니다.';
 
     var portalStatus = result.local_portal_status || null;
     if (portalStatus && portalStatus.supported === false && portalStatus.notice_ko) {{
@@ -530,11 +560,14 @@ PAGE_TEMPLATE = """<!doctype html>
       box.appendChild(notice);
     }}
 
-    var rows = result.results || [];
+    var rows = activeFilter === 'all'
+      ? allRows
+      : allRows.filter(function(r){{ return r.verdict && r.verdict.code === activeFilter; }});
     if (!rows.length) {{
       box.appendChild(el('div', 'empty',
-        '조건에 맞는 후보가 나오지 않았습니다. 지역·소득구간·상황 또는 사업자 조건을 바꿔 다시 시도해 보세요. ' +
-        '제도가 없다는 뜻은 아닙니다.'));
+        activeFilter === 'all'
+          ? '조건에 맞는 후보가 나오지 않았습니다. 지역·소득구간·상황 또는 사업자 조건을 바꿔 다시 시도해 보세요.'
+          : '선택한 분류에 해당하는 상위 결과가 없습니다. 다른 탭을 누르거나 소득구간·상황 조건을 더 입력해 보세요.'));
     }}
     rows.forEach(function(row){{
       var wrap = el('div', 'result');
@@ -625,7 +658,13 @@ PAGE_TEMPLATE = """<!doctype html>
     var button = document.getElementById('run');
     button.disabled = true;
     status.textContent = '판정 중…';
-    var payload = {{ profile: buildProfile(), limit: 20 }};
+    var includeClosedEl = document.getElementById('include_closed');
+    var payload = {{
+      profile: buildProfile(),
+      limit: 60,
+      include_closed: !!(includeClosedEl && includeClosedEl.checked)
+    }};
+    activeFilter = 'all';
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
@@ -648,7 +687,7 @@ PAGE_TEMPLATE = """<!doctype html>
   document.getElementById('fill-demo').addEventListener('click', function(){{
     document.getElementById('birth_year').value = '1992';
     document.querySelector('input[name=sex][value=male]').checked = true;
-    sido.value = '인천광역시'; resetSigungu(); sigungu.value = '서구';
+    sido.value = '인천광역시'; resetSigungu(); sigungu.value = '서해구';
     if (currentTrack() === 'business') {{
       document.getElementById('biz_status').value = 'pre';
       document.getElementById('biz_entity').value = 'pre_startup';

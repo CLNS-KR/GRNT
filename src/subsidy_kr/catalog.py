@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 import gzip
 import hashlib
 import json
@@ -190,7 +191,13 @@ class Service:
     def is_expired(self) -> bool:
         if self.is_business and self.business.get("recruiting") == "closed":
             return True
-        return bool(self.deadline.get("expired"))
+        dl = self.deadline
+        if dl.get("expired"):
+            return True
+        end_date = dl.get("end_date")
+        if end_date and end_date < date.today().isoformat():
+            return True
+        return False
 
     @cached_property
     def tags(self) -> List[str]:
