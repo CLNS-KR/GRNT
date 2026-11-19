@@ -16,7 +16,7 @@ from .api import mcp_tools
 from .catalog import Catalog
 from .version import __version__
 
-DEFAULT_BASE_URL = "https://grnt.onrender.com"
+DEFAULT_BASE_URL = "https://grnt-kr.onrender.com"
 
 
 def base_url(value: Optional[str] = None) -> str:

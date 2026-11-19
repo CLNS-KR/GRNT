@@ -4,7 +4,7 @@
   "title": "GRNT — Korean Grant & Subsidy Intelligence",
   "description": "Korean grant and startup-funding eligibility checks with official reasons and sources.",
   "version": "0.2.0",
-  "websiteUrl": "https://grnt.onrender.com/",
+  "websiteUrl": "https://grnt-kr.onrender.com/",
   "repository": {
     "url": "https://github.com/CLNS-KR/GRNT",
     "source": "github"
@@ -12,7 +12,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://grnt.onrender.com/mcp"
+      "url": "https://grnt-kr.onrender.com/mcp"
     }
   ]
 }

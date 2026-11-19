@@ -92,6 +92,19 @@ class DeploymentFilesTest(unittest.TestCase):
         self.assertIn("runtime: docker", text)
         self.assertNotIn("value: \"1\"\n      - key: DATA", text)
 
+    def test_public_url_matches_render_service_name(self):
+        """공개 주소는 서비스명(grnt-kr)과 같은 곳을 가리켜야 한다 — 한쪽만 바뀌면 죽은 URL 로 게시된다."""
+        manifest = json.loads(read("server.json"))
+        self.assertEqual(manifest["websiteUrl"], "https://grnt-kr.onrender.com/")
+        self.assertEqual(manifest["remotes"][0]["url"], "https://grnt-kr.onrender.com/mcp")
+        render = read("render.yaml")
+        self.assertIn("name: grnt-kr\n", render)
+        self.assertIn("value: https://grnt-kr.onrender.com\n", render)
+        self.assertIn('DEFAULT_BASE_URL = "https://grnt-kr.onrender.com"',
+                      read("src/subsidy_kr/static_files.py"))
+        for name in ("README.md", "server.json", "render.yaml", ".env.example"):
+            self.assertNotIn("https://grnt.onrender.com", read(name), name)
+
     def test_env_example_has_empty_key(self):
         text = read(".env.example")
         self.assertIn("DATA_GO_KR_SERVICE_KEY=", text)

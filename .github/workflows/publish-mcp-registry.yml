@@ -13,7 +13,7 @@
 #   3) 끝나면 https://registry.modelcontextprotocol.io/?q=CLNS 에서 확인한다.
 #
 # 원격(streamable-http) 서버라 npm/PyPI 패키지 게시 단계가 없다.
-# 게시 전 서버 생존 확인(remotes URL = https://grnt.onrender.com/mcp)이 있으므로,
+# 게시 전 서버 생존 확인(remotes URL = https://grnt-kr.onrender.com/mcp)이 있으므로,
 # Render 서비스가 내려가 있으면 이 워크플로도 실패한다.
 name: publish-mcp-registry
 

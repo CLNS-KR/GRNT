@@ -271,14 +271,14 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
 docker build -t grnt . && docker run -p 8787:8787 grnt   # 기본은 내장 샘플(32건)
 ```
 
-**Render** — `render.yaml` Blueprint 로 그대로 배포합니다(서비스명 `grnt`, Docker, free, singapore,
+**Render** — `render.yaml` Blueprint 로 그대로 배포합니다(서비스명 `grnt-kr` → `https://grnt-kr.onrender.com`, Docker, free, singapore,
 healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없이도 뜹니다.
 
 | 항목 | 값 |
 |---|---|
 | Runtime | Docker (`./Dockerfile`, context `.`) |
 | Health check | `/healthz` |
-| 환경변수(기본) | `PUBLIC_BASE_URL=https://grnt.onrender.com` · `SUBSIDY_KR_DATA=/app/data/gov24` · `SUBSIDY_KR_DB=/app/data/app.sqlite` |
+| 환경변수(기본) | `PUBLIC_BASE_URL=https://grnt-kr.onrender.com` · `SUBSIDY_KR_DATA=/app/data/gov24` · `SUBSIDY_KR_DB=/app/data/app.sqlite` |
 | 환경변수(실데이터 동기화 시에만) | `DATA_GO_KR_SERVICE_KEY` — 서버 기동에는 불필요, Render Shell 동기화에만 |
 
 배포 직후 첫 요청은 sleep 에서 깨어나 30~60초 걸릴 수 있고, `/healthz` 의 `catalog_state` 가
@@ -287,7 +287,8 @@ healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없�
 영구 디스크가 없어 재배포 시 초기화됩니다 — 그때는 다시 동기화하거나 유료 디스크를 붙입니다).
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
-(`CLNS-KR/GRNT`)에 맞춰 두었습니다. MCP Registry 는 Render URL 이 확정된 뒤 `v0.2.0` 태그로 게시합니다.
+(`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.2.0` 태그로 게시합니다.
 
 ## 9. 라이선스
 
