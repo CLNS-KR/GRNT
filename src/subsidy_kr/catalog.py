@@ -482,12 +482,41 @@ def read_catalog_payload(path: str) -> Any:
 
 
 def load_catalog(path: Optional[str] = None) -> Catalog:
-    """동기화 산출물(원본 또는 압축본)이 있으면 그것을, 없으면 샘플을 읽는다."""
+    """동기화 산출물(원본 또는 압축본)이 있으면 그것을, 없으면 샘플을 읽는다.
+
+    기본값으로 SQLite 인덱스(`catalog.sqlite`)를 생성/재사용해 대용량 JSON 메모리 상주를 막는다.
+    """
     target = path or os.path.join(data_dir_from_env(), CATALOG_FILENAME)
     source = next((candidate for candidate in catalog_candidates(target)
                    if os.path.exists(candidate)), None)
     if source is None:
         return sample_catalog()
+
+    use_sqlite = os.environ.get("SUBSIDY_KR_SQLITE", "1").strip() not in ("0", "false", "no")
+    if use_sqlite:
+        from .sqlite_store import SQLiteCatalog, build_sqlite_from_rows
+        db_path = os.path.join(os.path.dirname(os.path.abspath(source)), "catalog.sqlite")
+        try:
+            need_build = (
+                not os.path.exists(db_path)
+                or os.path.getmtime(source) > os.path.getmtime(db_path)
+            )
+            if need_build:
+                payload = read_catalog_payload(source)
+                rows = payload.get("services") or []
+                if not rows:
+                    raise ValueError("empty_catalog")
+                meta = dict(payload.get("meta") or {})
+                meta["catalog_state"] = "synced"
+                meta.setdefault("data_state", "live_sync")
+                meta["catalog_file"] = os.path.basename(source)
+                meta["catalog_compressed"] = source.endswith(CATALOG_GZIP_SUFFIX)
+                meta["catalog_backend"] = "sqlite"
+                build_sqlite_from_rows(rows, meta, db_path)
+            return SQLiteCatalog(db_path)  # type: ignore[return-value]
+        except (OSError, EOFError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+
     try:
         payload = read_catalog_payload(source)
         rows = payload.get("services") or []

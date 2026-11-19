@@ -57,12 +57,13 @@ def _known_paths() -> frozenset:
     try:
         from . import pseo
 
-        for slug in pseo.slugs():
+        for spec in pseo.TOPICS:
+            paths.add(f"/s/{spec['slug']}")
+        for slug in pseo.SIDO_SLUGS.values():
             paths.add(f"/s/{slug}")
     except Exception:  # noqa: BLE001 - 카탈로그가 없어도 카운터는 돌아야 한다
         pass
-    # 요청마다 load_catalog()로 25MB 카탈로그를 다시 읽지 않도록 1회만 계산해 둔다.
-    # 경로 집합은 프로세스 수명 동안 바뀌지 않는다(무료 플랜은 재배포 시 새 프로세스).
+    # 카탈로그를 열지 않고도 정적 주제·지역 슬러그를 즉시 구성한다.
     return frozenset(paths)
 
 

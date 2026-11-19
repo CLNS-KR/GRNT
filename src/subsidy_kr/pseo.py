@@ -70,9 +70,9 @@ SIDO_SLUGS: Dict[str, str] = {
 SLUG_TO_SIDO = {slug: sido for sido, slug in SIDO_SLUGS.items()}
 
 
-def _collect(catalog: Catalog, spec: Dict[str, Any]) -> List[Any]:
+def _collect(all_services: List[Any], spec: Dict[str, Any]) -> List[Any]:
     out = []
-    for svc in catalog.services:
+    for svc in all_services:
         if spec.get("tag") and spec["tag"] not in svc.tags:
             continue
         if spec.get("keyword"):
@@ -89,10 +89,11 @@ def _collect(catalog: Catalog, spec: Dict[str, Any]) -> List[Any]:
 
 
 def _build_items(catalog: Catalog) -> List[Dict[str, Any]]:
-    """페이지 목록을 실제로 만든다(카탈로그 전체를 주제·지역별로 훑는다)."""
+    """페이지 목록을 실제로 만든다(카탈로그 전체를 주제·지역별로 1회만 훑는다)."""
+    all_services = catalog.services
     pages: List[Dict[str, Any]] = []
     for spec in TOPICS:
-        services = _collect(catalog, spec)
+        services = _collect(all_services, spec)
         if not services:
             continue
         pages.append({
@@ -101,7 +102,7 @@ def _build_items(catalog: Catalog) -> List[Dict[str, Any]]:
             "indexable": len(services) >= MIN_INDEX_ITEMS,
         })
     for sido, slug in SIDO_SLUGS.items():
-        services = _collect(catalog, {"sido": sido})
+        services = _collect(all_services, {"sido": sido})
         if not services:
             continue
         pages.append({

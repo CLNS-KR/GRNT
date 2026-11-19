@@ -1099,27 +1099,39 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
     if cached is not None:
         return list(cached)
 
-    pool = catalog.services[:max_scan]
-    if region.get("level") in ("sido", "sigungu"):
-        pool = catalog.by_region(region.get("sido"), region.get("sigungu"))[:max_scan]
-    track = profile.get("track", "all")
-    if track == programs.TRACK_BUSINESS:
-        pool = [svc for svc in pool if svc.is_business]
-    elif track == programs.TRACK_PERSONAL:
-        pool = [svc for svc in pool if not svc.is_business]
-    elif not (profile.get("business") or {}).get("declared"):
-        # 트랙을 고르지 않았고 사업자 조건도 없으면 개인 제도만 보여 준다.
-        pool = [svc for svc in pool if not svc.is_business]
-    if not include_closed:
-        pool = [svc for svc in pool if not svc.is_expired]
-    if tag:
-        pool = [svc for svc in pool if tag in svc.tags]
-    if keyword:
-        words = [word for word in str(keyword).split() if word]
-        pool = [svc for svc in pool
-                if all(word in f"{svc.name} {svc.purpose} {svc.target} "
-                                f"{' '.join(svc.business.get('hashtags') or [])}"
-                       for word in words)]
+    if hasattr(catalog, "query_pool"):
+        pool = catalog.query_pool(
+            sido=region.get("sido"),
+            sigungu=region.get("sigungu"),
+            track=profile.get("track", "all"),
+            business_declared=bool((profile.get("business") or {}).get("declared")),
+            include_closed=include_closed,
+            tag=tag,
+            keyword=keyword,
+            max_scan=max_scan,
+        )
+    else:
+        pool = catalog.services[:max_scan]
+        if region.get("level") in ("sido", "sigungu"):
+            pool = catalog.by_region(region.get("sido"), region.get("sigungu"))[:max_scan]
+        track = profile.get("track", "all")
+        if track == programs.TRACK_BUSINESS:
+            pool = [svc for svc in pool if svc.is_business]
+        elif track == programs.TRACK_PERSONAL:
+            pool = [svc for svc in pool if not svc.is_business]
+        elif not (profile.get("business") or {}).get("declared"):
+            # 트랙을 고르지 않았고 사업자 조건도 없으면 개인 제도만 보여 준다.
+            pool = [svc for svc in pool if not svc.is_business]
+        if not include_closed:
+            pool = [svc for svc in pool if not svc.is_expired]
+        if tag:
+            pool = [svc for svc in pool if tag in svc.tags]
+        if keyword:
+            words = [word for word in str(keyword).split() if word]
+            pool = [svc for svc in pool
+                    if all(word in f"{svc.name} {svc.purpose} {svc.target} "
+                                    f"{' '.join(svc.business.get('hashtags') or [])}"
+                           for word in words)]
 
     if len(cache) >= POOL_CACHE_MAX:
         cache.clear()
