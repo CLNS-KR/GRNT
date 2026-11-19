@@ -674,48 +674,54 @@ PAGE_TEMPLATE = """<!doctype html>
     }}
     function buildCard(row){{
       var wrap = el('div', 'result');
+      wrap.style.padding = '12px 14px';
       var head = el('div', 'result-head');
+      head.style.cursor = 'pointer';
       var left = el('div');
       var title = el('h4');
       title.appendChild(document.createTextNode(row.name || ''));
       title.appendChild(el('span', 'tag', row.track === 'business' ? '창업·기업' : '개인·가구'));
+      var deadlineInfo = (row.application || {{}}).deadline || {{}};
+      var dLeft = deadlineInfo.days_left;
+      if (dLeft !== null && dLeft !== undefined && dLeft >= 0 && dLeft <= 7) {{
+        var dBadge = el('span', 'deadline-pill soon', 'D-' + dLeft + ' 마감임박');
+        dBadge.style.marginLeft = '6px';
+        title.appendChild(dBadge);
+      }}
       left.appendChild(title);
-      left.appendChild(el('p', 'meta', (row.agency || '') +
-        ' · ' + (row.field_label || '') +
-        ' · ' + (row.benefit_kind === 'program' ? '교육·건강·프로그램' : '지원금·혜택') +
-        (row.region && row.region.label ? ' · ' + row.region.label : '')));
+      var metaParts = [
+        row.agency || '',
+        row.field_label || '',
+        row.benefit_kind === 'program' ? '교육·건강·프로그램' : '지원금·혜택',
+        (row.region && row.region.label ? row.region.label : '')
+      ].filter(Boolean);
+      var deadlineLabel = deadlineInfo.label_ko || (row.application || {{}}).deadline_text || '';
+      if (deadlineLabel && !(dLeft !== null && dLeft !== undefined && dLeft >= 0 && dLeft <= 7)) {{
+        metaParts.push(deadlineLabel);
+      }}
+      left.appendChild(el('p', 'meta', metaParts.join(' · ')));
       head.appendChild(left);
       head.appendChild(el('span', 'badge ' + row.verdict.code, row.verdict.label_ko));
       wrap.appendChild(head);
+
+      var details = el('details');
+      details.style.marginTop = '8px';
+      details.appendChild(el('summary', null, '설명 · 판정 근거 · 신청 방법 보기'));
+      head.addEventListener('click', function(){{ details.open = !details.open; }});
+
       if (row.business_summary_ko) {{
-        wrap.appendChild(el('p', 'meta', '신청자격: ' + row.business_summary_ko));
+        details.appendChild(el('p', 'meta', '신청자격: ' + row.business_summary_ko));
       }}
       if (row.amount) {{
         var amt = el('p', 'amount', row.amount);
-        wrap.appendChild(amt);
-        if (row.amount.length > 120) {{
-          var moreBtn = el('button', 'more-btn', '내용 더 보기');
-          moreBtn.type = 'button';
-          moreBtn.addEventListener('click', function(){{
-            var open = amt.classList.toggle('expanded');
-            moreBtn.textContent = open ? '접기' : '내용 더 보기';
-          }});
-          wrap.appendChild(moreBtn);
-        }}
+        amt.classList.add('expanded');
+        amt.style.marginTop = '8px';
+        details.appendChild(amt);
       }}
 
-      var deadlineInfo = (row.application || {{}}).deadline || {{}};
-      var deadlineLabel = deadlineInfo.label_ko || (row.application || {{}}).deadline_text || '';
-      var dLeft = deadlineInfo.days_left;
-      if (dLeft !== null && dLeft !== undefined && dLeft >= 0 && dLeft <= 7) {{
-        deadlineLabel = 'D-' + dLeft + ' 마감임박' + (deadlineLabel ? ' · ' + deadlineLabel : '');
-      }}
-      if (deadlineLabel || row.detail_url || row.online_url) {{
+      if (row.online_url || row.detail_url) {{
         var quick = el('div', 'card-links');
-        if (deadlineLabel) {{
-          var dp = el('span', 'deadline-pill' + (deadlineInfo.closing_soon ? ' soon' : ''), deadlineLabel);
-          quick.appendChild(dp);
-        }}
+        quick.style.marginTop = '8px';
         if (row.online_url) {{
           var onBtn = el('a', 'btn-link', '온라인 신청');
           onBtn.href = row.online_url; onBtn.target = '_blank'; onBtn.rel = 'noopener noreferrer';
@@ -726,7 +732,7 @@ PAGE_TEMPLATE = """<!doctype html>
           detBtn.href = row.detail_url; detBtn.target = '_blank'; detBtn.rel = 'noopener noreferrer';
           quick.appendChild(detBtn);
         }}
-        wrap.appendChild(quick);
+        details.appendChild(quick);
       }}
 
       var why = el('div', 'why');
@@ -738,7 +744,7 @@ PAGE_TEMPLATE = """<!doctype html>
         }}
       }});
       why.appendChild(list);
-      wrap.appendChild(why);
+      details.appendChild(why);
 
       var missing = row.missing_information || [];
       if (missing.length) {{
@@ -747,11 +753,9 @@ PAGE_TEMPLATE = """<!doctype html>
         var ul = el('ul');
         missing.forEach(function(item){{ ul.appendChild(el('li', null, item.question_ko)); }});
         ask.appendChild(ul);
-        wrap.appendChild(ask);
+        details.appendChild(ask);
       }}
 
-      var details = el('details');
-      details.appendChild(el('summary', null, '근거·원문·신청 정보'));
       var deadline = (row.application || {{}}).deadline || {{}};
       var lines = [
         '신청기한: ' + ((row.application || {{}}).deadline_text || deadline.label_ko || '미기재'),
@@ -767,18 +771,6 @@ PAGE_TEMPLATE = """<!doctype html>
       if (row.criteria_flags && row.criteria_flags.length) {{
         details.appendChild(el('p', null, '원문에 함께 있는 요건: ' + row.criteria_flags.join(', ')));
       }}
-      var links = el('div', 'links');
-      if (row.detail_url) {{
-        var a = el('a', null, '공고·상세 보기');
-        a.href = row.detail_url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-        links.appendChild(a);
-      }}
-      if (row.online_url) {{
-        var b = el('a', null, '온라인 신청');
-        b.href = row.online_url; b.target = '_blank'; b.rel = 'noopener noreferrer';
-        links.appendChild(b);
-      }}
-      details.appendChild(links);
       if (row.attribution_ko) {{
         details.appendChild(el('p', 'origin', row.attribution_ko));
       }}
@@ -801,7 +793,7 @@ PAGE_TEMPLATE = """<!doctype html>
         var hdr = el('h3', null, fb + ' (' + list.length + '건)');
         hdr.style.cssText = 'font-size:15px;margin:0 0 8px;padding:6px 10px;background:#f3f4f6;border-radius:8px;display:flex;justify-content:space-between;align-items:center;';
         sec.appendChild(hdr);
-        var PREVIEW = 3;
+        var PREVIEW = 5;
         list.slice(0, PREVIEW).forEach(function(r){{ sec.appendChild(buildCard(r)); }});
         if (list.length > PREVIEW) {{
           var extraWrap = el('div', null);
