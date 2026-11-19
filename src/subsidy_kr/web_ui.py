@@ -551,52 +551,68 @@ PAGE_TEMPLATE = """<!doctype html>
     card.hidden = false;
 
     var allRows = result.results || [];
+    // 이전 동적 필터 바 정리
+    document.querySelectorAll('.sub-bar-dyn').forEach(function(elNode){{ elNode.remove(); }});
+
+    // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램 vs 전체)
+    var grantCnt = allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
+    var progCnt = allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
+    if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'all'; }}
+    var kindTabs = [
+      ['grant', '지원금·바우처'],
+      ['program', '교육·건강·프로그램'],
+      ['all', '전체 보기']
+    ];
+    var kindCounts = {{ grant: grantCnt, program: progCnt, all: allRows.length }};
+    kindTabs.forEach(function(pair){{
+      var k = pair[0], label = pair[1];
+      var kbtn = document.createElement('button');
+      kbtn.type = 'button';
+      kbtn.className = activeKind === k ? 'active' : '';
+      kbtn.style.fontWeight = '600';
+      kbtn.textContent = label + ' ' + kindCounts[k] + '건';
+      kbtn.addEventListener('click', function(){{
+        activeKind = k;
+        activeField = 'all';
+        activeFilter = 'all';
+        renderResults(lastData);
+      }});
+      counts.appendChild(kbtn);
+    }});
+
+    // 현재 선택된 큰 분류에 해당하는 행들 기준으로 판정·분야 건수 계산
+    var kindRows = allRows.filter(function(r){{
+      if (activeKind === 'grant') return r.benefit_kind !== 'program';
+      if (activeKind === 'program') return r.benefit_kind === 'program';
+      return true;
+    }});
+
     var labels = {{
-      all: '전체',
+      all: '전체 판정',
       eligible_likely: '받을 가능성 높음',
       check_needed: '조건 확인 필요',
-      insufficient_info: '정보 부족',
-      d7: '마감 D-7 임박'
+      insufficient_info: '정보 부족'
     }};
-    var rowCounts = {{all: allRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0, d7: 0}};
-    allRows.forEach(function(r){{
+    var rowCounts = {{all: kindRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0}};
+    kindRows.forEach(function(r){{
       var c = r.verdict && r.verdict.code;
       if (rowCounts[c] !== undefined) {{ rowCounts[c] += 1; }}
-      var dl = (((r.application || {{}}).deadline || {{}}).days_left);
-      if (dl !== null && dl !== undefined && dl >= 0 && dl <= 7) {{ rowCounts.d7 += 1; }}
     }});
+    var verdictBar = document.createElement('div');
+    verdictBar.className = 'counts sub-bar-dyn';
+    verdictBar.style.marginTop = '8px';
     Object.keys(labels).forEach(function(code){{
+      var cnt = code === 'all' ? kindRows.length : (rowCounts[code] || 0);
+      if (code !== 'all' && !cnt) return;
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = activeFilter === code ? 'active' : '';
-      var cnt = code === 'all' ? allRows.length : (rowCounts[code] || 0);
       btn.textContent = labels[code] + ' ' + cnt + '건';
       btn.addEventListener('click', function(){{
         activeFilter = code;
         renderResults(lastData);
       }});
-      counts.appendChild(btn);
-    }});
-
-    var kindTabs = {{
-      all: '전체 유형',
-      grant: '지원금·바우처만',
-      program: '교육·건강·프로그램'
-    }};
-    var grantCnt = allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
-    var progCnt = allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
-    var kindCounts = {{ all: allRows.length, grant: grantCnt, program: progCnt }};
-    Object.keys(kindTabs).forEach(function(k){{
-      var kbtn = document.createElement('button');
-      kbtn.type = 'button';
-      kbtn.className = activeKind === k ? 'active' : '';
-      kbtn.style.borderStyle = 'dashed';
-      kbtn.textContent = kindTabs[k] + ' ' + kindCounts[k] + '건';
-      kbtn.addEventListener('click', function(){{
-        activeKind = k;
-        renderResults(lastData);
-      }});
-      counts.appendChild(kbtn);
+      verdictBar.appendChild(btn);
     }});
 
     function fieldBucket(row){{
@@ -612,17 +628,17 @@ PAGE_TEMPLATE = """<!doctype html>
     }}
     var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
     var fieldCounts = {{}};
-    allRows.forEach(function(r){{
+    kindRows.forEach(function(r){{
       var b = fieldBucket(r);
       fieldCounts[b] = (fieldCounts[b] || 0) + 1;
     }});
     var fieldBar = document.createElement('div');
-    fieldBar.className = 'counts';
-    fieldBar.style.marginTop = '8px';
+    fieldBar.className = 'counts sub-bar-dyn';
+    fieldBar.style.marginTop = '6px';
     var fAllBtn = document.createElement('button');
     fAllBtn.type = 'button';
     fAllBtn.className = activeField === 'all' ? 'active' : '';
-    fAllBtn.textContent = '전체 분야 ' + allRows.length + '건';
+    fAllBtn.textContent = '전체 분야 ' + kindRows.length + '건';
     fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
     fieldBar.appendChild(fAllBtn);
     fieldOrder.forEach(function(fb){{
@@ -634,12 +650,8 @@ PAGE_TEMPLATE = """<!doctype html>
       fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
       fieldBar.appendChild(fbBtn);
     }});
-    counts.parentNode.insertBefore(fieldBar, counts.nextSibling);
-    // 재렌더링 시 중복 fieldBar 제거
-    while (fieldBar.nextSibling && fieldBar.nextSibling.className === 'counts field-bar-dyn') {{
-      fieldBar.parentNode.removeChild(fieldBar.nextSibling);
-    }}
-    fieldBar.className = 'counts field-bar-dyn';
+    counts.parentNode.insertBefore(verdictBar, counts.nextSibling);
+    counts.parentNode.insertBefore(fieldBar, verdictBar.nextSibling);
 
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
     var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
@@ -655,15 +667,9 @@ PAGE_TEMPLATE = """<!doctype html>
       box.appendChild(notice);
     }}
 
-    var rows = allRows.filter(function(r){{
-      if (activeKind === 'grant' && r.benefit_kind === 'program') return false;
-      if (activeKind === 'program' && r.benefit_kind !== 'program') return false;
+    var rows = kindRows.filter(function(r){{
       if (activeField !== 'all' && fieldBucket(r) !== activeField) return false;
       if (activeFilter === 'all') return true;
-      if (activeFilter === 'd7') {{
-        var dl = (((r.application || {{}}).deadline || {{}}).days_left);
-        return dl !== null && dl !== undefined && dl >= 0 && dl <= 7;
-      }}
       return r.verdict && r.verdict.code === activeFilter;
     }});
     if (!rows.length) {{
@@ -842,7 +848,7 @@ PAGE_TEMPLATE = """<!doctype html>
       payload.keyword = kwEl.value.trim();
     }}
     activeFilter = 'all';
-    activeKind = 'all';
+    activeKind = 'grant';
     activeField = 'all';
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
