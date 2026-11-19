@@ -274,6 +274,63 @@ _CHILD_KW = (
     "가정양육수당", "부모급여", "첫만남이용권", "아동수당",
     "초등학생", "중학생", "고등학생", "청소년",
 )
+_FARMER_FOREST_KW = (
+    "농업인", "농업기계", "스마트팜", "농산물도매", "축산", "양식업",
+    "어선", "어업인", "임업인", "산림사업", "특수산림", "백두대간",
+    "조림 지원", "숲가꾸기", "친환경농업", "귀농", "귀촌",
+)
+_VETERAN_MILITARY_KW = (
+    "장병 인권", "현역병", "군인", "전사자", "유해 소재", "국가유공자", "보훈대상",
+)
+_NICHE_SPECIAL_KW = (
+    "특별귀화", "귀화허가", "노숙인", "마약류 중독", "성범죄피해자",
+    "디지털성범죄", "범죄수익환수", "낙동강수계", "금강수계", "영산강수계",
+    "한강수계", "섬진강수계", "폐광", "광업자", "북한이탈주민", "탈북민",
+)
+_STUDENT_KW = ("고졸 후학습자", "국가장학금", "학자금 대출")
+
+
+def _infer_text_target_rule(service: Service, profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """자격 코드가 비어 있거나 느슨할 때 제목·대상의 명백한 특수 직군/대상 제한을 판정한다."""
+    text = f"{service.name} {service.target}"
+    situations = set(profile.get("situations") or [])
+    declared = bool(profile.get("situations_declared"))
+
+    if any(k in text for k in _FARMER_FOREST_KW):
+        if declared and "farmer" not in situations:
+            return _rule("life", FAIL,
+                         "농·림·축·어업인 대상 사업으로 보입니다(농업인 미선택).",
+                         required="농·림·축·어업인")
+        if not declared:
+            return _rule("criteria", NOTE,
+                         "농·림·축·어업인 대상 사업으로 보입니다. 해당 여부를 확인하세요.")
+
+    if any(k in text for k in _VETERAN_MILITARY_KW):
+        if declared and "veteran" not in situations:
+            return _rule("life", FAIL,
+                         "군인·보훈·유가족 대상 사업으로 보입니다(국가보훈대상자 미선택).",
+                         required="군인·보훈·유가족")
+        if not declared:
+            return _rule("criteria", NOTE,
+                         "군인·보훈·유가족 대상 사업으로 보입니다. 해당 여부를 확인하세요.")
+
+    if any(k in text for k in _STUDENT_KW):
+        if declared and "student" not in situations:
+            return _rule("criteria", NOTE,
+                         "학생·후학습자 대상 사업으로 보입니다. 신청 자격을 원문에서 확인하세요.")
+
+    if any(k in text for k in _NICHE_SPECIAL_KW):
+        return _rule("criteria", NOTE,
+                     "특수 대상 또는 특정 수계·폐광 지역 전용 사업입니다. 해당 여부를 원문에서 확인하세요.")
+
+    # 장기요양·치매 등 노인 전용 키워드는 연령 코드가 넓게 잡혀 있어도 추가 확인
+    if any(k in text for k in ("장기요양", "노인맞춤돌봄", "재가노인", "독거노인", "치매")):
+        if profile.get("age") is not None and profile["age"] < 60:
+            return _rule("age", FAIL,
+                         f"만 나이 {profile['age']}세는 노인·장기요양 대상 사업에 해당하지 않습니다.",
+                         required="만 60~65세 이상(노인·장기요양)",
+                         user_value=f"{profile['age']}세")
+    return None
 
 
 def _infer_text_age_rule(service: Service, profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -761,8 +818,22 @@ def evaluate_service(service: Service, profile: Dict[str, Any],
             check = _check_situation_group(service, profile, group)
             if check:
                 rules.append(check)
+        target_rule = _infer_text_target_rule(service, profile)
+        if target_rule:
+            rules.append(target_rule)
         criteria_rules = _criteria_rules(service)
     rules.extend(criteria_rules)
+
+    # 같은 안내 문구가 중복으로 들어가지 않게 정리한다.
+    deduped_rules: List[Dict[str, Any]] = []
+    seen_reasons = set()
+    for r in rules:
+        key = (r.get("state"), r.get("reason_ko"))
+        if key in seen_reasons:
+            continue
+        seen_reasons.add(key)
+        deduped_rules.append(r)
+    rules = deduped_rules
 
     states = [rule["state"] for rule in rules]
     if FAIL in states:
@@ -1101,13 +1172,21 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     return _copy_result(result)
 
 
-def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, str]:
+def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
     code = row["verdict"]["code"]
+    region_level = (row.get("region") or {}).get("level") or "nationwide"
+    region_tier = {"sigungu": 0, "sido": 1}.get(region_level, 2)
+    # 내가 입력한 조건(상황·가구·성별·자녀·업종)에 직접 맞물린 제도일수록 우선 노출
+    specific_hits = 0
+    for r in row.get("why") or []:
+        if r.get("state") == PASS and r.get("group") in ("life", "household", "business", "gender"):
+            if "가리지 않는" not in (r.get("reason_ko") or ""):
+                specific_hits += 1
     deadline = row.get("application", {}).get("deadline") or {}
     end = deadline.get("end_date") or "9999-12-31"
     # 마감이 임박한 것을 같은 등급 안에서 앞에 둔다.
     urgency = 0 if deadline.get("closing_soon") else 1
-    return (models.SORT_INDEX.get(code, 9), urgency, end)
+    return (models.SORT_INDEX.get(code, 9), -specific_hits, region_tier, urgency, end)
 
 
 def evaluate_by_id(catalog: Catalog, service_id: str,

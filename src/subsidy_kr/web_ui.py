@@ -37,6 +37,7 @@ BASE_CSS = """
     --info:#8ab8e8; --info-soft:#132436; --danger:#f0998f; --danger-soft:#2c1615;}
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.55;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
@@ -104,7 +105,22 @@ button.ghost{font:inherit;font-size:14px;font-weight:600;color:var(--ink-soft);b
 .badge.insufficient_info{background:var(--info-soft);color:var(--info)}
 .badge.ineligible{background:var(--danger-soft);color:var(--danger)}
 .meta{margin:6px 0 0;font-size:12.5px;color:var(--ink-soft)}
-.amount{margin:10px 0 0;font-size:14px;font-weight:700}
+.amount{margin:10px 0 0;font-size:13.5px;font-weight:500;line-height:1.5;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.amount.expanded{display:block;-webkit-line-clamp:unset;overflow:visible}
+.more-btn{margin-top:4px;padding:0;border:0;background:none;color:var(--brand);font:inherit;
+  font-size:12.5px;font-weight:700;cursor:pointer}
+.card-links{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.card-links a.btn-link{font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:8px;
+  background:var(--brand-soft);color:var(--brand-ink);text-decoration:none}
+.card-links a.btn-link:hover{text-decoration:underline}
+.deadline-pill{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:999px;
+  background:var(--bg);color:var(--ink-soft);border:1px solid var(--line)}
+.deadline-pill.soon{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.kw-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.kw-chips button{font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border-radius:999px;
+  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer}
+.kw-chips button:hover{border-color:var(--brand);color:var(--brand-ink)}
 .why{margin:10px 0 0;font-size:13px;color:var(--ink-soft)}
 .why ul{margin:4px 0 0;padding-left:18px}
 .ask{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:var(--info-soft);color:var(--info);font-size:13px}
@@ -118,6 +134,7 @@ details p{margin:6px 0 0}
 .counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 .counts button{font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;
   background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer;font-family:inherit}
+.counts button.active{background:var(--brand);border-color:var(--brand);color:#fff}
 .counts button.active{background:var(--brand);border-color:var(--brand);color:#fff}
 .track{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
 .track label{position:relative;flex:1 1 200px}
@@ -373,6 +390,20 @@ PAGE_TEMPLATE = """<!doctype html>
           </label>
         </div>
 
+        <div style="margin-top:14px">
+          <label class="field">
+            <span class="lab">키워드 필터 <span class="opt">선택 · 찾고 싶은 지원금만 좁혀 보기</span></span>
+            <input type="text" id="keyword" name="keyword" placeholder="예: 출산, 전세, 청년, 육아, 소상공인">
+          </label>
+          <div class="kw-chips" id="kw-chips">
+            <button type="button" data-kw="출산">출산·임신</button>
+            <button type="button" data-kw="전세">전세·주거</button>
+            <button type="button" data-kw="청년">청년</button>
+            <button type="button" data-kw="육아">육아·돌봄</button>
+            <button type="button" data-kw="소상공인">소상공인</button>
+          </div>
+        </div>
+
         <div style="margin-top:12px">
           <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink-soft);cursor:pointer">
             <input type="checkbox" id="include_closed"> 지난(마감) 공고도 포함해서 보기
@@ -533,7 +564,7 @@ PAGE_TEMPLATE = """<!doctype html>
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = activeFilter === code ? 'active' : '';
-      var cnt = code === 'all' ? allRows.length : ((result.counts || {{}})[code] || rowCounts[code] || 0);
+      var cnt = code === 'all' ? allRows.length : (rowCounts[code] || 0);
       btn.textContent = labels[code] + ' ' + cnt + '건';
       btn.addEventListener('click', function(){{
         activeFilter = code;
@@ -550,13 +581,9 @@ PAGE_TEMPLATE = """<!doctype html>
 
     var portalStatus = result.local_portal_status || null;
     if (portalStatus && portalStatus.supported === false && portalStatus.notice_ko) {{
-      var notice = el('div', 'empty');
-      notice.style.background = '#fff8e1';
-      notice.style.border = '1px solid #f59e0b';
-      notice.style.color = '#78350f';
-      notice.style.marginBottom = '14px';
-      notice.style.textAlign = 'left';
-      notice.textContent = '미연동 지역 안내: ' + portalStatus.notice_ko;
+      var notice = el('div', 'notice');
+      notice.style.margin = '0 0 14px';
+      notice.textContent = '구·군청 자체 공지 안내: ' + portalStatus.notice_ko;
       box.appendChild(notice);
     }}
 
@@ -586,7 +613,40 @@ PAGE_TEMPLATE = """<!doctype html>
       if (row.business_summary_ko) {{
         wrap.appendChild(el('p', 'meta', '신청자격: ' + row.business_summary_ko));
       }}
-      if (row.amount) {{ wrap.appendChild(el('p', 'amount', row.amount)); }}
+      if (row.amount) {{
+        var amt = el('p', 'amount', row.amount);
+        wrap.appendChild(amt);
+        if (row.amount.length > 120) {{
+          var moreBtn = el('button', 'more-btn', '내용 더 보기');
+          moreBtn.type = 'button';
+          moreBtn.addEventListener('click', function(){{
+            var open = amt.classList.toggle('expanded');
+            moreBtn.textContent = open ? '접기' : '내용 더 보기';
+          }});
+          wrap.appendChild(moreBtn);
+        }}
+      }}
+
+      var deadlineInfo = (row.application || {{}}).deadline || {{}};
+      var deadlineLabel = deadlineInfo.label_ko || (row.application || {{}}).deadline_text || '';
+      if (deadlineLabel || row.detail_url || row.online_url) {{
+        var quick = el('div', 'card-links');
+        if (deadlineLabel) {{
+          var dp = el('span', 'deadline-pill' + (deadlineInfo.closing_soon ? ' soon' : ''), deadlineLabel);
+          quick.appendChild(dp);
+        }}
+        if (row.online_url) {{
+          var onBtn = el('a', 'btn-link', '온라인 신청');
+          onBtn.href = row.online_url; onBtn.target = '_blank'; onBtn.rel = 'noopener noreferrer';
+          quick.appendChild(onBtn);
+        }}
+        if (row.detail_url) {{
+          var detBtn = el('a', 'btn-link', '공고·상세 보기');
+          detBtn.href = row.detail_url; detBtn.target = '_blank'; detBtn.rel = 'noopener noreferrer';
+          quick.appendChild(detBtn);
+        }}
+        wrap.appendChild(quick);
+      }}
 
       var why = el('div', 'why');
       why.appendChild(el('strong', null, '판정 근거'));
@@ -659,11 +719,15 @@ PAGE_TEMPLATE = """<!doctype html>
     button.disabled = true;
     status.textContent = '판정 중…';
     var includeClosedEl = document.getElementById('include_closed');
+    var kwEl = document.getElementById('keyword');
     var payload = {{
       profile: buildProfile(),
-      limit: 60,
+      limit: 200,
       include_closed: !!(includeClosedEl && includeClosedEl.checked)
     }};
+    if (kwEl && kwEl.value.trim()) {{
+      payload.keyword = kwEl.value.trim();
+    }}
     activeFilter = 'all';
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
@@ -681,6 +745,16 @@ PAGE_TEMPLATE = """<!doctype html>
       status.textContent = '조회에 실패했습니다(' + error.message + '). 잠시 뒤 다시 시도해 주세요.';
     }}).finally(function(){{
       button.disabled = false;
+    }});
+  }});
+
+  Array.prototype.slice.call(document.querySelectorAll('#kw-chips button')).forEach(function(btn){{
+    btn.addEventListener('click', function(){{
+      var kwInput = document.getElementById('keyword');
+      if (kwInput) {{
+        kwInput.value = btn.getAttribute('data-kw') || '';
+        form.dispatchEvent(new Event('submit', {{cancelable: true}}));
+      }}
     }});
   }});
 
