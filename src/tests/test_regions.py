@@ -32,7 +32,7 @@ class SidoTest(unittest.TestCase):
 
 class SigunguTest(unittest.TestCase):
     def test_resolution(self):
-        self.assertEqual(regions.canonical_sigungu("인천광역시", "서구"), "서구")
+        self.assertEqual(regions.canonical_sigungu("인천광역시", "서구"), "서해구")
         self.assertEqual(regions.canonical_sigungu("경기도", "수원 장안구"), "수원시 장안구")
         self.assertEqual(regions.canonical_sigungu("경기도", "구리"), "구리시")
         self.assertEqual(regions.canonical_sigungu("경기도", "부천"), "부천시")
@@ -51,7 +51,7 @@ class SigunguTest(unittest.TestCase):
         self.assertEqual(regions.region_block("인천광역시")["level"], "sido")
         block = regions.region_block("인천", "서구")
         self.assertEqual((block["level"], block["sido"], block["sigungu"]),
-                         ("sigungu", "인천광역시", "서구"))
+                         ("sigungu", "인천광역시", "서해구"))
         self.assertEqual(regions.region_block("", "서구")["level"], "local_unresolved")
 
 
@@ -64,7 +64,7 @@ class AgencyRegionTest(unittest.TestCase):
     def test_full_names(self):
         block = regions.parse_agency_region("인천광역시 서구")
         self.assertEqual((block["level"], block["sido"], block["sigungu"]),
-                         ("sigungu", "인천광역시", "서구"))
+                         ("sigungu", "인천광역시", "서해구"))
         self.assertEqual(regions.parse_agency_region("세종특별자치시")["level"], "sido")
         self.assertEqual(regions.parse_agency_region("제주시")["sigungu"], "제주시")
 
@@ -96,7 +96,7 @@ class MatchTest(unittest.TestCase):
     def test_mismatch_and_match(self):
         user = regions.region_block("인천광역시", "서구")
         self.assertEqual(regions.match_region(
-            user, self._service(level="sigungu", sido="인천광역시", sigungu="서구"))["state"], "match")
+            user, self._service(level="sigungu", sido="인천광역시", sigungu="서해구"))["state"], "match")
         self.assertEqual(regions.match_region(
             user, self._service(level="sigungu", sido="인천광역시", sigungu="남동구"))["state"],
             "mismatch")

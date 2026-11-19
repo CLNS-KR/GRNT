@@ -264,10 +264,65 @@ def _check_gender(service: Service, profile: Dict[str, Any]) -> Optional[Dict[st
     return _rule("gender", PASS, f"성별 조건 충족({label})", required=label, user_value=label)
 
 
+_SENIOR_KW = (
+    "노인", "어르신", "경로", "만 65세", "65세 이상", "기초연금",
+    "독거노인", "치매", "장기요양", "재가노인", "노인맞춤돌봄",
+)
+_MIDDLE_KW = ("중장년", "신중년")
+_CHILD_KW = (
+    "영유아", "신생아", "기저귀", "조제분유", "어린이집", "유치원",
+    "가정양육수당", "부모급여", "첫만남이용권", "아동수당",
+    "초등학생", "중학생", "고등학생", "청소년",
+)
+
+
+def _infer_text_age_rule(service: Service, profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """자격 코드에 연령이 없을 때 제목·대상 텍스트의 명백한 연령대 제한을 판정한다."""
+    text = f"{service.name} {service.target}"
+    if any(k in text for k in ("전 연령", "전연령", "전 주민", "전 시민", "전 구민", "누구나")):
+        return None
+
+    # 1) 노인·어르신 전용 (청년·아동이 함께 언급되지 않은 경우)
+    if any(k in text for k in _SENIOR_KW) and not any(k in text for k in ("청년", "아동", "청소년", "임산부")):
+        if profile["age"] is None:
+            return _rule("age", UNKNOWN, "노인·어르신 대상 사업으로 보입니다. 나이를 확인해야 합니다.",
+                         required="만 65세 이상(노인·어르신)", missing_key="age")
+        if profile["age"] < 60:
+            return _rule("age", FAIL,
+                         f"만 나이 {profile['age']}세는 노인·어르신(만 60~65세 이상) 대상 사업에 해당하지 않습니다.",
+                         required="만 65세 이상(노인·어르신)", user_value=f"{profile['age']}세")
+        return None
+
+    # 2) 중장년 전용 (청년이 함께 언급되지 않은 경우)
+    if any(k in text for k in _MIDDLE_KW) and "청년" not in text:
+        if profile["age"] is None:
+            return _rule("age", UNKNOWN, "중장년 대상 사업으로 보입니다. 나이를 확인해야 합니다.",
+                         required="만 40~64세(중장년)", missing_key="age")
+        if profile["age"] < 40 or profile["age"] >= 65:
+            return _rule("age", FAIL,
+                         f"만 나이 {profile['age']}세는 중장년(만 40~64세) 대상 사업에 해당하지 않습니다.",
+                         required="만 40~64세(중장년)", user_value=f"{profile['age']}세")
+        return None
+
+    # 3) 영유아·아동·청소년 전용
+    if any(k in text for k in _CHILD_KW) and "청년" not in text:
+        if not profile["children_declared"]:
+            return _rule("age", UNKNOWN,
+                         "영유아·아동·청소년 대상 사업으로 보입니다. 자녀 유무 및 나이를 확인해야 합니다.",
+                         required="아동·청소년(자녀)", missing_key="children_ages",
+                         subject="child", age_basis="child")
+        if not profile["children_ages"]:
+            return _rule("age", FAIL, "대상 아동·청소년이 없다고 입력되었습니다.",
+                         required="아동·청소년(자녀)", subject="child", age_basis="child")
+        return None
+
+    return None
+
+
 def _check_age(service: Service, profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     age = service.age
     if not age["limited"]:
-        return None
+        return _infer_text_age_rule(service, profile)
     low, high = age["min_age"], age["max_age"]
     required = _age_text(low, high)
     child_subject = service.age_subject == "child"
@@ -880,12 +935,13 @@ def profile_key(profile: Dict[str, Any]) -> Tuple[Any, ...]:
     `evaluate_service` 가 읽는 값(나이·성별·지역·소득구간·상황·자녀·사업자 조건)을
     모두 담는다. 라벨처럼 파생값도 함께 넣어, 손으로 만든 프로필이 섞여도 충돌하지 않는다.
     """
-    region = profile.get("region") or {}
+    region_raw = profile.get("region")
+    region = region_raw if isinstance(region_raw, dict) else {"raw": str(region_raw or "")}
     business = profile.get("business") or {}
     return (
-        profile.get("age"), profile.get("sex"),
+        profile.get("age"), profile.get("birth_year"), profile.get("sex"),
         region.get("level"), region.get("sido"), region.get("sigungu"),
-        region.get("label"), region.get("unresolved_sigungu"),
+        region.get("label"), region.get("unresolved_sigungu"), region.get("raw"),
         profile.get("household_size"), profile.get("income_band"),
         profile.get("income_band_label"),
         tuple(profile.get("situations") or ()),

@@ -9,7 +9,7 @@ from datetime import date
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from subsidy_kr import deadlines, engine, local_portals  # noqa: E402
+from subsidy_kr import catalog, deadlines, engine, local_portals  # noqa: E402
 
 TODAY = date(2026, 11, 19)
 
@@ -114,7 +114,13 @@ class LocalPortalsTest(unittest.TestCase):
     def test_normalize_profile_string_region(self):
         prof = engine.normalize_profile({"region": "인천 서구", "age": 34}, today=TODAY)
         self.assertEqual(prof["region"]["sido"], "인천광역시")
-        self.assertEqual(prof["region"]["sigungu"], "서구")
+        self.assertEqual(prof["region"]["sigungu"], "서해구")
+
+    def test_text_age_filter_drops_senior_and_middle_for_1995(self):
+        cat = catalog.load_catalog()
+        res = engine.search(cat, engine.normalize_profile({"region": "인천 서해구", "birth_year": 1995}, today=TODAY), limit=30)
+        names = [r["name"] for r in res["results"]]
+        self.assertFalse(any("노인돌봄" in n or "중장년" in n for n in names), names)
 
 
 if __name__ == "__main__":

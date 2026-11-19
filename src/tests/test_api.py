@@ -96,7 +96,7 @@ class ToolCallTest(unittest.TestCase):
         self.assertEqual(out["result"]["criteria_state"], "missing")
         self.assertIn("확인", out["result"]["criteria_note_ko"])
         service = out["result"]["service"]
-        self.assertEqual(service["region"]["sigungu"], "서구")
+        self.assertEqual(service["region"]["sigungu"], "서해구")
         self.assertTrue(service["documents"])
 
     def test_detail_with_profile_adds_verdict(self):

@@ -34,7 +34,7 @@ class SampleCatalogTest(unittest.TestCase):
 
     def test_regions_parsed_from_agency(self):
         local = self.catalog.get("SMP-0015")
-        self.assertEqual((local.region["sido"], local.region["sigungu"]), ("인천광역시", "서구"))
+        self.assertEqual((local.region["sido"], local.region["sigungu"]), ("인천광역시", "서해구"))
         national = self.catalog.get("SMP-0001")
         self.assertEqual(national.region["level"], "national")
 

@@ -84,7 +84,7 @@ def _profile_from_args(args: Dict[str, Any]) -> Dict[str, Any]:
         "children_years", "children_ages", "track", "biz_status", "biz_entity",
         "biz_years", "biz_industry",
     ) if args.get(key) not in (None, "")}
-    if isinstance(args.get("region"), dict):
+    if isinstance(args.get("region"), (dict, str)):
         flat["region"] = args["region"]
     if isinstance(args.get("business"), dict):
         flat["business"] = args["business"]

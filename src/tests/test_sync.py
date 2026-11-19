@@ -92,7 +92,7 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(service.age["min_age"], 19)
         self.assertTrue(service.has_criteria)
         self.assertFalse(catalog.get("R-2").has_criteria)
-        self.assertEqual(catalog.get("R-2").region["sigungu"], "서구")
+        self.assertEqual(catalog.get("R-2").region["sigungu"], "서해구")
         self.assertEqual(service.conditions["JA0412"], "Y")
 
     def test_second_run_uses_cache_without_calls(self):

@@ -766,6 +766,22 @@ def fetch_broso_all(*, max_pages_per_sido: int = 8,
 # ---------------------------------------------------------------------------
 # 통합 수집 및 미연동 지역 안내
 # ---------------------------------------------------------------------------
+def _enrich_local_conditions(row: Dict[str, Any]) -> Dict[str, Any]:
+    """지자체 포털 공고 제목·대상에 명시된 핵심 자격 코드를 보강한다."""
+    cond = dict(row.get("conditions") or {})
+    text = f"{row.get('서비스명', '')} {row.get('지원대상', '')} {row.get('소관기관명', '')}"
+    if "1인가구" in text or "인천1인가구포털" in row.get("소관기관명", ""):
+        cond.setdefault("JA0404", "Y")
+    if "임산부" in text or "임신" in text:
+        cond.setdefault("JA0302", "Y")
+    if "장애인" in text or "발달장애" in text:
+        cond.setdefault("JA0328", "Y")
+    if any(k in text for k in ("기초생활", "기초수급", "차상위", "법정저소득")):
+        cond.setdefault("JA0201", "Y")
+    row["conditions"] = cond
+    return row
+
+
 def collect_all_local_portals(*, today: Optional[date] = None,
                               include_expired: bool = False,
                               broso_max_pages: int = 8) -> Dict[str, Any]:
@@ -785,7 +801,7 @@ def collect_all_local_portals(*, today: Optional[date] = None,
         if key in seen_names:
             continue
         seen_names.add(key)
-        combined.append(row)
+        combined.append(_enrich_local_conditions(row))
 
     return {
         "records": combined,
