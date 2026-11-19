@@ -538,6 +538,7 @@ PAGE_TEMPLATE = """<!doctype html>
 
   var activeFilter = 'all';
   var activeKind = 'all';
+  var activeField = 'all';
   var lastData = null;
 
   function renderResults(data){{
@@ -598,6 +599,48 @@ PAGE_TEMPLATE = """<!doctype html>
       counts.appendChild(kbtn);
     }});
 
+    function fieldBucket(row){{
+      var fl = String(row.field_label || row.field || '기타').trim();
+      if (/주거|주택|전세|월세/.test(fl)) return '주거·주택';
+      if (/보육|교육|아동|양육/.test(fl)) return '보육·교육';
+      if (/고용|창업|사업화|정책자금|R&D|멘토링/.test(fl)) return '고용·창업·경제';
+      if (/보건|의료|건강/.test(fl)) return '보건·의료';
+      if (/문화|체육|관광|행사/.test(fl)) return '문화·여가';
+      if (/농림|어업/.test(fl)) return '농림·어업';
+      if (/생활|복지/.test(fl)) return '생활·복지';
+      return '행정·기타';
+    }}
+    var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
+    var fieldCounts = {{}};
+    allRows.forEach(function(r){{
+      var b = fieldBucket(r);
+      fieldCounts[b] = (fieldCounts[b] || 0) + 1;
+    }});
+    var fieldBar = document.createElement('div');
+    fieldBar.className = 'counts';
+    fieldBar.style.marginTop = '8px';
+    var fAllBtn = document.createElement('button');
+    fAllBtn.type = 'button';
+    fAllBtn.className = activeField === 'all' ? 'active' : '';
+    fAllBtn.textContent = '전체 분야 ' + allRows.length + '건';
+    fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
+    fieldBar.appendChild(fAllBtn);
+    fieldOrder.forEach(function(fb){{
+      if (!fieldCounts[fb]) return;
+      var fbBtn = document.createElement('button');
+      fbBtn.type = 'button';
+      fbBtn.className = activeField === fb ? 'active' : '';
+      fbBtn.textContent = fb + ' ' + fieldCounts[fb] + '건';
+      fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
+      fieldBar.appendChild(fbBtn);
+    }});
+    counts.parentNode.insertBefore(fieldBar, counts.nextSibling);
+    // 재렌더링 시 중복 fieldBar 제거
+    while (fieldBar.nextSibling && fieldBar.nextSibling.className === 'counts field-bar-dyn') {{
+      fieldBar.parentNode.removeChild(fieldBar.nextSibling);
+    }}
+    fieldBar.className = 'counts field-bar-dyn';
+
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
     var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
     document.getElementById('results-sub').textContent =
@@ -615,6 +658,7 @@ PAGE_TEMPLATE = """<!doctype html>
     var rows = allRows.filter(function(r){{
       if (activeKind === 'grant' && r.benefit_kind === 'program') return false;
       if (activeKind === 'program' && r.benefit_kind !== 'program') return false;
+      if (activeField !== 'all' && fieldBucket(r) !== activeField) return false;
       if (activeFilter === 'all') return true;
       if (activeFilter === 'd7') {{
         var dl = (((r.application || {{}}).deadline || {{}}).days_left);
@@ -628,7 +672,7 @@ PAGE_TEMPLATE = """<!doctype html>
           ? '조건에 맞는 후보가 나오지 않았습니다. 지역·소득구간·상황 또는 사업자 조건을 바꿔 다시 시도해 보세요.'
           : '선택한 분류에 해당하는 상위 결과가 없습니다. 다른 탭을 누르거나 소득구간·상황 조건을 더 입력해 보세요.'));
     }}
-    rows.forEach(function(row){{
+    function buildCard(row){{
       var wrap = el('div', 'result');
       var head = el('div', 'result-head');
       var left = el('div');
@@ -739,8 +783,48 @@ PAGE_TEMPLATE = """<!doctype html>
         details.appendChild(el('p', 'origin', row.attribution_ko));
       }}
       wrap.appendChild(details);
-      box.appendChild(wrap);
-    }});
+      return wrap;
+    }}
+
+    if (activeField === 'all' && rows.length > 0) {{
+      var grouped = {{}};
+      rows.forEach(function(r){{
+        var b = fieldBucket(r);
+        if (!grouped[b]) grouped[b] = [];
+        grouped[b].push(r);
+      }});
+      fieldOrder.forEach(function(fb){{
+        var list = grouped[fb];
+        if (!list || !list.length) return;
+        var sec = el('div', 'field-group');
+        sec.style.margin = '14px 0 18px';
+        var hdr = el('h3', null, fb + ' (' + list.length + '건)');
+        hdr.style.cssText = 'font-size:15px;margin:0 0 8px;padding:6px 10px;background:#f3f4f6;border-radius:8px;display:flex;justify-content:space-between;align-items:center;';
+        sec.appendChild(hdr);
+        var PREVIEW = 3;
+        list.slice(0, PREVIEW).forEach(function(r){{ sec.appendChild(buildCard(r)); }});
+        if (list.length > PREVIEW) {{
+          var extraWrap = el('div', null);
+          extraWrap.style.display = 'none';
+          list.slice(PREVIEW).forEach(function(r){{ extraWrap.appendChild(buildCard(r)); }});
+          sec.appendChild(extraWrap);
+          var moreG = el('button', 'btn-link', '+ ' + fb + ' 나머지 ' + (list.length - PREVIEW) + '건 더 보기');
+          moreG.type = 'button';
+          moreG.style.marginTop = '6px';
+          moreG.addEventListener('click', function(){{
+            var open = extraWrap.style.display !== 'none';
+            extraWrap.style.display = open ? 'none' : 'block';
+            moreG.textContent = open
+              ? ('+ ' + fb + ' 나머지 ' + (list.length - PREVIEW) + '건 더 보기')
+              : (fb + ' 접기');
+          }});
+          sec.appendChild(moreG);
+        }}
+        box.appendChild(sec);
+      }});
+    }} else {{
+      rows.forEach(function(row){{ box.appendChild(buildCard(row)); }});
+    }}
 
     var notes = (result.profile && result.profile.missing_core) || [];
     document.getElementById('results-foot').textContent = notes.length
@@ -767,6 +851,7 @@ PAGE_TEMPLATE = """<!doctype html>
     }}
     activeFilter = 'all';
     activeKind = 'all';
+    activeField = 'all';
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
