@@ -228,9 +228,25 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── web_ui.py          인라인 CSS/JS 단일 페이지(두 트랙)
     │   ├── pseo.py            /s/ 주제·지역 페이지(thin content 규칙)
     │   ├── static_files.py    robots·llms·sitemap·server-card
+    │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
     │   └── usage.py           익명 일별 카운터
-    └── tests/                 unittest 20개 파일 · 277건
+    └── tests/                 unittest 23개 파일 · 321건
 ```
+
+### 5-1. 응답 시간과 캐시
+
+실데이터 12,429건에서는 요청마다 카탈로그를 다시 훑는 것이 느립니다(Render 무료 0.1 vCPU 에서
+`search_subsidies` 한 번에 5.9초). 카탈로그는 읽기 전용이므로 다음을 한 번만 계산해 재사용합니다.
+
+| 캐시 | 위치 | 아끼는 것 |
+|---|---|---|
+| 후보 목록(필터 조합별) | `engine._candidate_pool` | 매 호출 1.2만 건 필터링 |
+| 판정 결과((프로필, 옵션)별 LRU, 반환 행 수 6,000개 상한) | `engine._ResultCache` | 같은 조건 재요청 전부 |
+| 제도별 선정기준·소득·상황 요건 문구 | `engine._criteria_rules` 등 | 프로필과 무관한 문자열·라벨 재계산 |
+| `/s/` 주제·지역 페이지 목록 | `pseo.items` | 페이지·사이트맵마다 35번 훑던 것 |
+
+**판정은 바뀌지 않습니다.** `src/tests/test_search_cache.py` 가 캐시 도입 전과 같은 계산을
+그대로 다시 구현해, 샘플과 실데이터(전국 1.2만 건 포함)에서 결과가 완전히 같은지 비교합니다.
 
 ---
 
@@ -280,6 +296,27 @@ healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없�
 | Health check | `/healthz` |
 | 환경변수(기본) | `PUBLIC_BASE_URL=https://grnt-kr.onrender.com` · `SUBSIDY_KR_DATA=/app/data/gov24` · `SUBSIDY_KR_DB=/app/data/app.sqlite` |
 | 환경변수(실데이터 동기화 시에만) | `DATA_GO_KR_SERVICE_KEY` — 서버 기동에는 불필요, Render Shell 동기화에만 |
+| 환경변수(검색엔진 소유확인, 선택) | `GOOGLE_SITE_VERIFICATION` · `NAVER_SITE_VERIFICATION` · `SITE_VERIFICATION_FILES` — 아래 8-1 |
+
+### 8-1. 검색엔진 소유확인(구글 서치콘솔·네이버 서치어드바이저)
+
+코드 수정 없이 환경변수만 넣고 재시작하면 확인이 끝납니다. 아무 것도 넣지 않으면 응답은 이전과
+완전히 같습니다.
+
+| 환경변수 | 값 | 결과 |
+|---|---|---|
+| `GOOGLE_SITE_VERIFICATION` | 구글 서치콘솔이 발급한 토큰(`content` 값) | `/`·`/s/`·`/s/{slug}` head 에 `<meta name="google-site-verification" content="...">` |
+| `NAVER_SITE_VERIFICATION` | 네이버 서치어드바이저 토큰 | 같은 head 에 `<meta name="naver-site-verification" content="...">` |
+| `SITE_VERIFICATION_FILES` | JSON 한 줄. 예: `{"naver1a2b3c.html": "naver-site-verification: naver1a2b3c.html"}` | 루트 경로(`/naver1a2b3c.html`)로 파일 본문을 서빙(GET·HEAD) |
+
+로컬에서 확인:
+
+```bash
+GOOGLE_SITE_VERIFICATION=abc123 SITE_VERIFICATION_FILES='{"g1.html":"google-site-verification: g1.html"}' \
+  PYTHONPATH=src python -m subsidy_kr.server
+curl -s localhost:8787/ | grep site-verification
+curl -s localhost:8787/g1.html
+```
 
 배포 직후 첫 요청은 sleep 에서 깨어나 30~60초 걸릴 수 있고, `/healthz` 의 `catalog_state` 가
 `sample` 이면 아직 실데이터가 없다는 뜻입니다. 실데이터는 Render Shell 에서
@@ -288,7 +325,7 @@ healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없�
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.2.1` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.2.2` 태그로 게시합니다.
 
 ## 9. 라이선스
 

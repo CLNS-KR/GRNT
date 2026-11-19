@@ -8,7 +8,7 @@
 #
 # 쓰는 법
 #   1) 이 파일을 main 에 올린다(평소처럼 push).
-#   2) server.json 의 version 을 올린 뒤 `v0.2.1` 처럼 태그를 push 하거나,
+#   2) server.json 의 version 을 올린 뒤 `v0.2.2` 처럼 태그를 push 하거나,
 #      Actions 화면에서 이 워크플로를 수동 실행한다.
 #   3) 끝나면 https://registry.modelcontextprotocol.io/?q=CLNS 에서 확인한다.
 #

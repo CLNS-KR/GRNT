@@ -25,6 +25,7 @@ LLM 판단은 개입하지 않습니다. 문장(지원대상·선정기준)은 *
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -310,11 +311,56 @@ def _in_range(value: Optional[int], low: Optional[int], high: Optional[int]) -> 
     return True
 
 
+# 프로필과 무관한 문구(요건 라벨·원문 발췌)는 제도별로 한 번만 만든다.
+_INCOME_BASIS_ATTR = "_engine_income_basis"
+_GROUP_BASIS_ATTR = "_engine_group_basis"
+_EXCERPT_ATTR = "_engine_criteria_excerpt"
+
+
+def _income_basis(service: Service) -> Optional[Tuple[Tuple[str, ...], str]]:
+    """(소득구간 코드들, 화면·사유에 쓰는 요건 문구)."""
+    cached = service.__dict__.get(_INCOME_BASIS_ATTR)
+    if cached is None:
+        bands = tuple(service.income_bands)
+        cached = (bands, " 또는 ".join(conditions.band_label(code) for code in bands)) \
+            if bands else ((), "")
+        service.__dict__[_INCOME_BASIS_ATTR] = cached
+    return cached if cached[0] else None
+
+
+def _group_basis(service: Service, group: str) -> Optional[Tuple[Tuple[str, ...], str, bool]]:
+    """(묶음 코드들, 요건 문구, '상황을 가리지 않음' 여부)."""
+    cache = service.__dict__.get(_GROUP_BASIS_ATTR)
+    if cache is None:
+        cache = {}
+        service.__dict__[_GROUP_BASIS_ATTR] = cache
+    basis = cache.get(group)
+    if basis is None:
+        codes = tuple(service.groups.get(group, []))
+        if codes:
+            labels = [conditions.CODE_CATALOG.get(code, ("", code))[1] for code in codes]
+            required = " · ".join(dict.fromkeys(labels))
+            loose = any(code in conditions.GROUP_ANY_CODES.get(group, ()) for code in codes)
+            basis = (codes, required, bool(loose))
+        else:
+            basis = ((), "", False)
+        cache[group] = basis
+    return basis if basis[0] else None
+
+
+def _criteria_excerpt_for(service: Service) -> str:
+    cached = service.__dict__.get(_EXCERPT_ATTR)
+    if cached is None:
+        cached = _criteria_excerpt(service.criteria)
+        service.__dict__[_EXCERPT_ATTR] = cached
+    return cached
+
+
 def _check_income(service: Service, profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    bands = service.income_bands
-    if not bands:
+    basis = _income_basis(service)
+    if basis is None:
         return None
-    required = " 또는 ".join(conditions.band_label(code) for code in bands)
+    bands, required = basis
     if profile["income_band"] is None:
         return _rule("income", UNKNOWN, "소득구간 조건이 있는 제도입니다.", required=required,
                      missing_key="income_band")
@@ -329,12 +375,11 @@ def _check_income(service: Service, profile: Dict[str, Any]) -> Optional[Dict[st
 
 def _check_situation_group(service: Service, profile: Dict[str, Any],
                            group: str) -> Optional[Dict[str, Any]]:
-    codes = list(service.groups.get(group, []))
-    if not codes:
+    basis = _group_basis(service, group)
+    if basis is None:
         return None
-    required_labels = [conditions.CODE_CATALOG.get(code, ("", code))[1] for code in codes]
-    required = " · ".join(dict.fromkeys(required_labels))
-    if any(code in conditions.GROUP_ANY_CODES.get(group, ()) for code in codes):
+    codes, required, loose = basis
+    if loose:
         return _rule(group, PASS, "특정 상황을 가리지 않는 제도입니다.", required="제한 없음")
     if not profile["situations_declared"]:
         return _rule(group, UNKNOWN,
@@ -605,6 +650,21 @@ def _criteria_excerpt(text: str) -> str:
     return clean[:MAX_CRITERIA_EXCERPT].rstrip() + "…"
 
 
+# 선정기준 규칙은 프로필과 무관하다. 제도 하나를 여러 번 판정해도 다시 만들지 않도록
+# 서비스 객체에 붙여 둔다(cached_property 와 같은 방식, 키 이름만 엔진 전용).
+_TAIL_RULES_ATTR = "_engine_criteria_rules"
+
+
+def _criteria_rules(service: Service) -> Tuple[Dict[str, Any], ...]:
+    cached = service.__dict__.get(_TAIL_RULES_ATTR)
+    if cached is None:
+        rules = (_check_business_criteria(service) if service.is_business
+                 else _check_criteria(service))
+        cached = tuple(rules)
+        service.__dict__[_TAIL_RULES_ATTR] = cached
+    return cached
+
+
 # ---------------------------------------------------------------------------
 # 판정
 # ---------------------------------------------------------------------------
@@ -632,13 +692,13 @@ def evaluate_service(service: Service, profile: Dict[str, Any],
         if check:
             rules.append(check)
     if service.is_business:
-        criteria_rules = _check_business_criteria(service)
+        criteria_rules: Tuple[Dict[str, Any], ...] = _criteria_rules(service)
     else:
         for group in ("life", "household", "business"):
             check = _check_situation_group(service, profile, group)
             if check:
                 rules.append(check)
-        criteria_rules = _check_criteria(service)
+        criteria_rules = _criteria_rules(service)
     rules.extend(criteria_rules)
 
     states = [rule["state"] for rule in rules]
@@ -676,7 +736,7 @@ def evaluate_service(service: Service, profile: Dict[str, Any],
         "missing_information": missing,
         "criteria_state": "present" if service.has_criteria else "missing",
         "criteria_flags": service.criteria_flags,
-        "criteria_excerpt": _criteria_excerpt(service.criteria),
+        "criteria_excerpt": _criteria_excerpt_for(service),
         "amount": service.content,
         "application": {"how": service.how, "deadline_text": service.deadline_text,
                         "deadline": deadline, "receipt_agency": service.receipt_agency},
@@ -798,12 +858,112 @@ def _dedupe(notes: List[str]) -> List[str]:
 # ---------------------------------------------------------------------------
 # 검색
 # ---------------------------------------------------------------------------
-def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
-           include_ineligible: bool = False, tag: Optional[str] = None,
-           keyword: Optional[str] = None, max_scan: int = 20000,
-           include_closed: bool = False) -> Dict[str, Any]:
-    """프로필로 후보 제도를 판정한다. 트랙·지역·마감 여부로 후보를 줄인 뒤 판정한다."""
+# 결과 캐시에 보관할 '돌려주는 행' 수 상한. 캐시에는 limit 만큼의 행만 남고(전국 검색도
+# 반환은 최대 50행), 행 하나가 약 4.7KB 이므로 6,000행 ≈ 28MB 다. 판정한 전체 건수는
+# 메모리에 남기지 않는다(세기만 하고 버린다).
+SEARCH_CACHE_MAX_ROWS = 6000
+# 후보 목록(필터별) 캐시 — 1.2만 건 목록의 포인터만 들고 있어 항목당 수십 KB 다.
+POOL_CACHE_MAX = 32
+
+
+def profile_key(profile: Dict[str, Any]) -> Tuple[Any, ...]:
+    """판정에 영향을 주는 프로필 값만 뽑은 캐시 키.
+
+    `evaluate_service` 가 읽는 값(나이·성별·지역·소득구간·상황·자녀·사업자 조건)을
+    모두 담는다. 라벨처럼 파생값도 함께 넣어, 손으로 만든 프로필이 섞여도 충돌하지 않는다.
+    """
+    region = profile.get("region") or {}
+    business = profile.get("business") or {}
+    return (
+        profile.get("age"), profile.get("sex"),
+        region.get("level"), region.get("sido"), region.get("sigungu"),
+        region.get("label"), region.get("unresolved_sigungu"),
+        profile.get("household_size"), profile.get("income_band"),
+        profile.get("income_band_label"),
+        tuple(profile.get("situations") or ()),
+        tuple(profile.get("situation_labels") or ()),
+        bool(profile.get("situations_declared")),
+        bool(profile.get("children_declared")),
+        tuple(profile.get("children_ages") or ()),
+        business.get("declared"), business.get("status"), business.get("entity"),
+        business.get("entity_label"), business.get("years"), business.get("industry"),
+        business.get("industry_label"),
+    )
+
+
+class _ResultCache:
+    """(프로필, 옵션) → 판정 결과. 돌려주는 행 수로 메모리를 묶는 LRU.
+
+    카탈로그는 읽기 전용이고 판정은 프로필로만 결정되므로 같은 입력이면 같은 결과다.
+    (결과에는 limit 만큼의 행만 담기므로, 전국 1.2만 건을 훑은 결과도 몇 KB 다.)
+    """
+
+    __slots__ = ("_entries", "_rows", "max_rows")
+
+    def __init__(self, max_rows: int = SEARCH_CACHE_MAX_ROWS) -> None:
+        self.max_rows = max_rows
+        self._entries: OrderedDict[Tuple[Any, ...], Tuple[int, Dict[str, Any]]] = OrderedDict()
+        self._rows = 0
+
+    def get(self, key: Tuple[Any, ...]) -> Optional[Dict[str, Any]]:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        try:
+            self._entries.move_to_end(key)
+        except KeyError:   # 다른 스레드가 방금 축출했다 — 값은 이미 손에 있으니 그대로 쓴다
+            pass
+        return entry[1]
+
+    def put(self, key: Tuple[Any, ...], result: Dict[str, Any], rows: int) -> None:
+        if rows > self.max_rows:
+            return   # 한 건이 상한을 넘으면 담지 않는다(메모리 보호).
+        old = self._entries.pop(key, None)
+        if old is not None:
+            self._rows -= old[0]
+        self._entries[key] = (rows, result)
+        self._rows += rows
+        while self._rows > self.max_rows and self._entries:
+            try:
+                _key, entry = self._entries.popitem(last=False)
+            except KeyError:   # 다른 스레드가 먼저 축출했다
+                break
+            self._rows -= entry[0]
+
+
+def _result_cache(catalog: Catalog) -> _ResultCache:
+    cache = catalog.memo.get("search_results")
+    if cache is None:
+        cache = _ResultCache()
+        catalog.memo["search_results"] = cache
+    return cache
+
+
+def _copy_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """캐시에서 꺼낸 결과를 호출자가 바꿔도 캐시가 오염되지 않게 겉껍질을 복사한다."""
+    copy = dict(result)
+    copy["counts"] = dict(result["counts"])
+    copy["track_counts"] = dict(result["track_counts"])
+    copy["results"] = [dict(row) for row in result["results"]]
+    return copy
+
+
+def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
+                    tag: Optional[str], keyword: Optional[str],
+                    include_closed: bool) -> List[Service]:
+    """트랙·지역·마감·태그·검색어로 후보를 줄인 목록 — 필터 조합별로 한 번만 만든다."""
     region = profile["region"]
+    key = (region.get("level"), region.get("sido"), region.get("sigungu"),
+           profile.get("track", "all"), bool((profile.get("business") or {}).get("declared")),
+           bool(include_closed), tag or "", keyword or "", int(max_scan))
+    cache = catalog.memo.get("pools")
+    if cache is None:
+        cache = {}
+        catalog.memo["pools"] = cache
+    cached = cache.get(key)
+    if cached is not None:
+        return list(cached)
+
     pool = catalog.services[:max_scan]
     if region.get("level") in ("sido", "sigungu"):
         pool = catalog.by_region(region.get("sido"), region.get("sigungu"))[:max_scan]
@@ -827,6 +987,28 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
                                 f"{' '.join(svc.business.get('hashtags') or [])}"
                        for word in words)]
 
+    if len(cache) >= POOL_CACHE_MAX:
+        cache.clear()
+    cache[key] = tuple(pool)
+    return pool
+
+
+def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
+           include_ineligible: bool = False, tag: Optional[str] = None,
+           keyword: Optional[str] = None, max_scan: int = 20000,
+           include_closed: bool = False) -> Dict[str, Any]:
+    """프로필로 후보 제도를 판정한다. 트랙·지역·마감 여부로 후보를 줄인 뒤 판정한다."""
+    cache = _result_cache(catalog)
+    cache_key = (profile_key(profile), int(limit), bool(include_ineligible),
+                 tag or "", keyword or "", int(max_scan), bool(include_closed))
+    hit = cache.get(cache_key)
+    if hit is not None:
+        return _copy_result(hit)
+
+    pool = _candidate_pool(catalog, profile, max_scan=max_scan, tag=tag, keyword=keyword,
+                           include_closed=include_closed)
+    track = profile.get("track", "all")
+
     results = [evaluate_service(svc, profile) for svc in pool]
     if not include_ineligible:
         shown = [row for row in results if row["verdict"]["code"] != models.VERDICT_INELIGIBLE]
@@ -840,7 +1022,7 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     for row in results:
         track_counts[row["track"]] = track_counts.get(row["track"], 0) + 1
 
-    return {
+    result = {
         "counts": counts,
         "scanned": len(results),
         "results": shown[:max(1, limit)],
@@ -849,10 +1031,10 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
                               if not include_ineligible else 0),
         "track": track,
         "track_counts": track_counts,
-        "closed_hidden": sum(1 for svc in catalog.services
-                             if svc.is_business and svc.business.get("recruiting") == "closed")
-        if not include_closed else 0,
+        "closed_hidden": catalog.closed_business_count if not include_closed else 0,
     }
+    cache.put(cache_key, result, len(result["results"]))
+    return _copy_result(result)
 
 
 def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, str]:

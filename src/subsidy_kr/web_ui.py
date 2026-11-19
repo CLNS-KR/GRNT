@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from . import conditions, programs, regions
+from . import conditions, programs, regions, site_verification
 from .version import __version__
 
 SERVICE_NAME = "GRNT"
@@ -229,6 +229,7 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         notice=notice,
         count=count,
         generated=generated,
+        verification=site_verification.meta_tags(),
     )
 
 
@@ -247,7 +248,7 @@ PAGE_TEMPLATE = """<!doctype html>
 <meta property="og:locale" content="ko_KR">
 <meta name="twitter:card" content="summary">
 <meta name="robots" content="index,follow">
-<script type="application/ld+json">
+{verification}<script type="application/ld+json">
 {{"@context":"https://schema.org","@type":"WebApplication","name":"{service_name}",
 "applicationCategory":"FinanceApplication","operatingSystem":"Web","inLanguage":"ko-KR",
 "isAccessibleForFree":true,"offers":{{"@type":"Offer","price":"0","priceCurrency":"KRW"}},

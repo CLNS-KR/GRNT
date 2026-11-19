@@ -6,12 +6,15 @@
 - `SUBSIDY_KR_DATA` 동기화 카탈로그 디렉터리(기본 `data/gov24`)
 - `SUBSIDY_KR_DB`   카운터·스냅샷 SQLite(기본 `data/app.sqlite`)
 - `PUBLIC_BASE_URL` robots/llms/sitemap 의 공개 주소
+- `GOOGLE_SITE_VERIFICATION`·`NAVER_SITE_VERIFICATION` 구글·네이버 소유확인 메타태그 값
+- `SITE_VERIFICATION_FILES` 루트에 서빙할 확인 파일 JSON(`{"naverXXXX.html": "..."}`)
 
 경로
 ----
 `GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/healthz` · `/v1/meta` · `/v1/stats` ·
 `/v1/mcp`(매니페스트) · `/mcp`·`/v1/mcp`(POST JSON-RPC) · `/v1/tools/{tool}`(POST) ·
-`/robots.txt` · `/llms.txt` · `/sitemap.xml` · `/.well-known/mcp/server-card.json`
+`/robots.txt` · `/llms.txt` · `/sitemap.xml` · `/.well-known/mcp/server-card.json` ·
+`/{확인파일}.html`(환경변수로 등록한 경우)
 
 보안
 ----
@@ -29,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import mcp_http, pseo, static_files, usage
+from . import mcp_http, pseo, site_verification, static_files, usage
 from .api import call_tool, mcp_manifest
 from .catalog import Catalog, data_dir_from_env, load_catalog
 from .store import Store
@@ -163,6 +166,9 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                 self._head(200, "text/plain; charset=utf-8")
             elif path == "/sitemap.xml":
                 self._head(200, "application/xml; charset=utf-8")
+            elif site_verification.file_body(path) is not None:
+                # 검색엔진 소유확인용 HTML 파일(환경변수 SITE_VERIFICATION_FILES 로만 열린다).
+                self._head(200, "text/html; charset=utf-8")
             elif path == "/.well-known/mcp/server-card.json":
                 self._head(200, "application/json; charset=utf-8")
             else:
@@ -229,6 +235,10 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     query = urlparse(self.path).query
                     self._send_json(200, usage.stats_payload(store, _days_param(query)),
                                     cache="public, max-age=300")
+                elif site_verification.file_body(path) is not None:
+                    # 검색엔진 소유확인용 HTML 파일(환경변수 SITE_VERIFICATION_FILES 로만 열린다).
+                    self._send_text(200, site_verification.file_body(path) or "",
+                                    "text/html; charset=utf-8")
                 elif path.rstrip("/") == "/mcp":
                     self.send_response(405)  # SSE GET 은 제공하지 않는다(스펙 허용)
                     self.send_header("Allow", "POST, OPTIONS")

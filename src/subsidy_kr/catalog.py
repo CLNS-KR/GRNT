@@ -315,6 +315,15 @@ class Catalog:
         self.by_id = {svc.service_id: svc for svc in services}
         self._stats: Optional[Dict[str, Any]] = None
         self._by_sido: Dict[str, List[Service]] = {}
+        # 요청과 무관한 파생값 캐시(카탈로그는 읽기 전용이다). `engine`·`pseo` 가 함께 쓴다.
+        # 서버는 이 객체 하나를 프로세스 수명 동안 재사용하므로, 여기에 계산 결과를 두면
+        # 요청마다 1.2만 건을 다시 훑지 않아도 된다.
+        self.memo: Dict[str, Any] = {}
+        # 모집이 마감된 창업·기업 공고 수 — search() 가 매 호출 전체를 세지 않도록 1회 계산.
+        self.closed_business_count = sum(
+            1 for svc in services
+            if svc.is_business and svc.business.get("recruiting") == "closed"
+        )
         for svc in services:
             if svc.region.get("sido") and svc.region.get("level") in ("sido", "sigungu"):
                 self._by_sido.setdefault(svc.region["sido"], []).append(svc)

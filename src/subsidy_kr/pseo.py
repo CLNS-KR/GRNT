@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .catalog import Catalog, tag_label
+from . import site_verification
 
 MIN_INDEX_ITEMS = 5
 # 한 페이지에 보여 줄 최대 제도 수(실데이터에서 400건짜리 주제도 한 장에 담기지 않게)
@@ -87,8 +88,8 @@ def _collect(catalog: Catalog, spec: Dict[str, Any]) -> List[Any]:
     return out
 
 
-def items(catalog: Catalog) -> List[Dict[str, Any]]:
-    """렌더 가능한 페이지 목록(제도 1건 이상)."""
+def _build_items(catalog: Catalog) -> List[Dict[str, Any]]:
+    """페이지 목록을 실제로 만든다(카탈로그 전체를 주제·지역별로 훑는다)."""
     pages: List[Dict[str, Any]] = []
     for spec in TOPICS:
         services = _collect(catalog, spec)
@@ -110,6 +111,20 @@ def items(catalog: Catalog) -> List[Dict[str, Any]]:
             "indexable": len(services) >= MIN_INDEX_ITEMS,
         })
     return pages
+
+
+def items(catalog: Catalog) -> List[Dict[str, Any]]:
+    """렌더 가능한 페이지 목록(제도 1건 이상).
+
+    카탈로그는 읽기 전용이므로 한 번 만든 목록을 재사용한다. 만드는 데 카탈로그 전체를
+    주제 18 + 지역 17 번 훑기 때문에(실데이터 1.2만 건) 요청마다 다시 만들면 `/s/`·
+    `/s/{slug}`·`/sitemap.xml` 이 수 초 걸린다.
+    """
+    cached = catalog.memo.get("pseo_items")
+    if cached is None:
+        cached = tuple(_build_items(catalog))
+        catalog.memo["pseo_items"] = cached
+    return list(cached)
 
 
 def slugs(catalog: Optional[Catalog] = None) -> List[str]:
@@ -140,7 +155,7 @@ def _page(title: str, description: str, body: str, *, noindex: bool = False,
 <title>{title}</title>
 <meta name="description" content="{description}">
 <meta name="robots" content="{robots}">
-<meta property="og:title" content="{title}">
+{site_verification.meta_tags()}<meta property="og:title" content="{title}">
 <meta property="og:description" content="{description}">
 <meta property="og:locale" content="ko_KR">
 <link rel="canonical" href="{canonical}">
