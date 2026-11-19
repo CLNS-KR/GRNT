@@ -1,0 +1,100 @@
+# GRNT — 공식 MCP Registry 게시 (io.github.CLNS-KR/grnt)
+#
+# 왜 OIDC 인가
+#   `mcp-publisher login github`(대화형 device flow)는 GitHub App 토큰이라 조직 멤버십을
+#   읽지 못해 **org 네임스페이스(io.github.CLNS-KR/*)로 게시할 수 없다**(registry #1468).
+#   GitHub Actions OIDC 는 이 제약을 받지 않고, 이 저장소(CLNS-KR/GRNT)에서 도는 것 자체로
+#   조직 통제를 증명한다. 그래서 개인 PAT·개인 계정을 어디에도 두지 않는다.
+#
+# 쓰는 법
+#   1) 이 파일을 main 에 올린다(평소처럼 push).
+#   2) server.json 의 version 을 올린 뒤 `v0.2.0` 처럼 태그를 push 하거나,
+#      Actions 화면에서 이 워크플로를 수동 실행한다.
+#   3) 끝나면 https://registry.modelcontextprotocol.io/?q=CLNS 에서 확인한다.
+#
+# 원격(streamable-http) 서버라 npm/PyPI 패키지 게시 단계가 없다.
+# 게시 전 서버 생존 확인(remotes URL = https://grnt.onrender.com/mcp)이 있으므로,
+# Render 서비스가 내려가 있으면 이 워크플로도 실패한다.
+name: publish-mcp-registry
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write          # OIDC 인증에 필수
+
+concurrency:
+  group: publish-mcp-registry
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+      PYTHONPATH: ${{ github.workspace }}/src
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test before publishing (네트워크 불필요)
+        working-directory: src
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: 서버 생존 확인 (remotes URL)
+        run: |
+          set -uo pipefail
+          url="$(python -c "import json;print(json.load(open('server.json'))['remotes'][0]['url'])")"
+          body='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+          for attempt in 1 2 3; do
+            echo "attempt $attempt: $url"
+            if curl --fail --silent --show-error --max-time 90 -o /tmp/mcp-init.out -X POST "$url" \
+                 -H 'Content-Type: application/json' \
+                 -H 'Accept: application/json, text/event-stream' \
+                 -d "$body"; then
+              head -c 400 /tmp/mcp-init.out; echo; echo "server is reachable"; exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::remotes URL 이 응답하지 않습니다 — 원격 서버는 공개 접근 가능해야 합니다."
+          exit 1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: 태그가 있으면 server.json 버전을 태그에 맞춘다
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          python -c "import json,os; p='server.json'; d=json.load(open(p)); d['version']=os.environ['GITHUB_REF_NAME'].lstrip('v'); json.dump(d, open(p,'w'), ensure_ascii=False, indent=2); print('server.json version ->', d['version'])"
+
+      - name: Authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish

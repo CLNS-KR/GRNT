@@ -19,7 +19,9 @@ RUN adduser --disabled-password --gecos "" --uid 10001 app \
     && mkdir -p /app/data/gov24
 
 COPY --chown=app:app src/ /app/src/
-# 동기화 산출물이 있으면 함께 넣는다(없으면 내장 샘플로 동작 — .dockerignore 가 빈 디렉터리를 허용).
+# data/ 를 통째로 넣는다 — 저장소에 커밋된 data/gov24/catalog.json.gz(약 3.8MB) 가
+# 함께 들어가서 이미지가 샘플이 아니라 12,429건 실데이터로 뜬다. 원본 catalog.json 이
+# 있으면 로더가 그쪽을 먼저 읽는다. (캐시·DB는 .dockerignore 가 제외)
 COPY --chown=app:app data/ /app/data/
 
 RUN chown -R app:app /app/data

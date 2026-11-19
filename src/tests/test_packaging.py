@@ -64,6 +64,18 @@ class DeploymentFilesTest(unittest.TestCase):
         for secret in ("DATA_GO_KR_SERVICE_KEY=", "LAW_GO_KR_OC="):
             self.assertNotIn(secret, text)
 
+    def test_gzip_catalog_is_shipped_not_ignored(self):
+        """압축 카탈로그는 git·Docker 양쪽에 들어간다(배포 환경 실데이터 부팅의 전제)."""
+        gitignore = read(".gitignore")
+        self.assertIn("!data/gov24/catalog.json.gz", gitignore)
+        # 예외는 무시 규칙 뒤에 와야 효력이 있다
+        self.assertLess(gitignore.index("data/gov24/*"),
+                        gitignore.index("!data/gov24/catalog.json.gz"))
+        for line in read(".dockerignore").splitlines():
+            code = line.split("#", 1)[0]
+            self.assertNotIn("catalog.json.gz", code, line)
+        self.assertIn("COPY --chown=app:app data/ /app/data/", read("Dockerfile"))
+
     def test_render_blueprint(self):
         text = read("render.yaml")
         self.assertIn("healthCheckPath: /healthz", text)

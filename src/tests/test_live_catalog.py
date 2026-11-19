@@ -1,6 +1,7 @@
 """동기화 산출물(실데이터) 통합 검증 — 산출물이 없으면 건너뛴다.
 
-`python -m subsidy_kr.sync_gov24 --sources all` 로 받은 `data/gov24/catalog.json` 이
+`python -m subsidy_kr.sync_gov24 --sources all` 로 받은 `data/gov24/catalog.json`(또는
+저장소에 커밋된 압축본 `catalog.json.gz`)이
 있을 때만 돌아갑니다. 샘플로는 잡히지 않는 실데이터 특유의 회귀를 막는 것이 목적입니다.
 """
 from __future__ import annotations
@@ -18,7 +19,8 @@ from subsidy_kr import engine, models, programs  # noqa: E402
 from subsidy_kr.catalog import load_catalog  # noqa: E402
 
 CATALOG = os.path.join(PROJECT, "data", "gov24", "catalog.json")
-HAS_DATA = os.path.exists(CATALOG)
+# 저장소(=CI·이미지)에는 압축본 catalog.json.gz 만 커밋된다. 둘 중 하나가 있으면 돈다.
+HAS_DATA = os.path.exists(CATALOG) or os.path.exists(CATALOG + ".gz")
 
 
 @unittest.skipUnless(HAS_DATA, "동기화 산출물이 없어 건너뜁니다")
@@ -30,7 +32,7 @@ class LiveCatalogTest(unittest.TestCase):
     def test_catalog_is_synced_and_mixed(self):
         self.assertEqual(self.catalog.meta["catalog_state"], "synced")
         stats = self.catalog.stats()
-        self.assertGreater(stats["services"], 1000)
+        self.assertGreaterEqual(stats["services"], 12000)
         self.assertGreater(stats["by_track"][programs.TRACK_PERSONAL], 0)
         self.assertGreater(stats["by_track"][programs.TRACK_BUSINESS], 0)
         self.assertIn("gov24", stats["by_source"])

@@ -4,6 +4,8 @@
 ---------------------
 - `sample`  : 내장 샘플(`sample_data.py` + `sample_programs.py`). 키·네트워크 없이 전체 기능 검증용.
 - `synced`  : `python -m subsidy_kr.sync_gov24` 가 만든 `data/gov24/catalog.json`.
+              같은 내용의 압축본 `catalog.json.gz` 만 있어도 읽습니다(저장소·이미지에 넣는
+              배포용 형태 — 24MB → 3.8MB). 둘 다 있으면 압축하지 않은 파일을 먼저 씁니다.
 
 두 모드는 **같은 정규화 경로**를 지납니다. 실데이터로 바뀌어도 판정·MCP·웹 UI 코드는
 그대로입니다. 카탈로그에는 두 트랙이 함께 들어갑니다.
@@ -15,6 +17,7 @@
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -435,25 +438,48 @@ def sample_catalog() -> Catalog:
     return Catalog([normalize_service(raw, source="sample") for raw in rows], meta)
 
 
+CATALOG_FILENAME = "catalog.json"
+CATALOG_GZIP_SUFFIX = ".gz"
+
+
+def catalog_candidates(target: str) -> List[str]:
+    """읽을 후보 경로 — 압축하지 않은 원본을 먼저, 그다음 `.gz` 압축본."""
+    if target.endswith(CATALOG_GZIP_SUFFIX):
+        return [target]
+    return [target, target + CATALOG_GZIP_SUFFIX]
+
+
+def read_catalog_payload(path: str) -> Any:
+    """`catalog.json` 또는 `catalog.json.gz` 를 읽어 JSON 으로 돌려준다."""
+    if path.endswith(CATALOG_GZIP_SUFFIX):
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            return json.load(handle)
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def load_catalog(path: Optional[str] = None) -> Catalog:
-    """동기화 산출물이 있으면 그것을, 없으면 샘플을 읽는다."""
-    target = path or os.path.join(data_dir_from_env(), "catalog.json")
-    if not os.path.exists(target):
+    """동기화 산출물(원본 또는 압축본)이 있으면 그것을, 없으면 샘플을 읽는다."""
+    target = path or os.path.join(data_dir_from_env(), CATALOG_FILENAME)
+    source = next((candidate for candidate in catalog_candidates(target)
+                   if os.path.exists(candidate)), None)
+    if source is None:
         return sample_catalog()
     try:
-        with open(target, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
+        payload = read_catalog_payload(source)
         rows = payload.get("services") or []
         if not rows:
             raise ValueError("empty_catalog")
         meta = dict(payload.get("meta") or {})
         meta["catalog_state"] = "synced"
         meta.setdefault("data_state", "live_sync")
+        meta["catalog_file"] = os.path.basename(source)
+        meta["catalog_compressed"] = source.endswith(CATALOG_GZIP_SUFFIX)
         services = [normalize_service(row, source="gov24") for row in rows]
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    except (OSError, EOFError, ValueError, TypeError, json.JSONDecodeError):
         catalog = sample_catalog()
         catalog.meta["fallback_reason_ko"] = (
-            "동기화 산출물(catalog.json)을 읽지 못해 내장 샘플로 동작합니다."
+            "동기화 산출물(catalog.json / catalog.json.gz)을 읽지 못해 내장 샘플로 동작합니다."
         )
         return catalog
     return Catalog(services, meta)

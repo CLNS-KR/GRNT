@@ -13,9 +13,10 @@
 - JSON API: `POST /v1/tools/{tool}` — 툴 7종
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
-- API 키 없이 동작: 저장소에는 동기화 산출물을 넣지 않습니다(25MB·기관 담당자 연락처 때문).
-  대신 산출물이 없으면 내장 샘플(개인 20 + 창업·기업 12)로 모든 기능이 오프라인에서 그대로 뜹니다.
-  `data/gov24/catalog.json` 을 만들면(아래 3분 실행) 샘플 대신 실데이터로 판정합니다.
+- API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
+  로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
+  동기화 없이 바로 12,429건 실데이터로 뜹니다. 내장 샘플(개인 20 + 창업·기업 12)은 둘 다 없을 때의 오프라인 대체입니다.
+  `data/gov24/catalog.json` 을 새로 만들면(아래 3분 실행) 그 파일이 압축본보다 우선합니다.
 - 저장소: <https://github.com/CLNS-KR/GRNT> · 이미지: `docker build -t grnt .`
 - 실데이터 기준(2026-11-19 동기화): **제도 12,429건 — 개인·가구 10,887 · 창업·기업 1,542**
   (K-Startup 30,629건 중 모집·마감 30일 이내 207건, 기업마당 1,335건)
@@ -174,9 +175,23 @@ PYTHONPATH=src python -m subsidy_kr.sync_gov24 --sources all     # 날마다 한
 ```
 
 스냅샷은 날마다 한 장씩 쌓입니다(현재 약 9MB/일, 전량 12,429건 기준). 그래서
-`data/gov24/` 는 **커밋하지 않습니다**(`.gitignore`). 샘플이 아닌 실데이터로 돌리려면
-각 환경에서 동기화해 `catalog.json` 을 만들면 됩니다. `data/gov24/cache/` 는 git·Docker
-양쪽에서 제외됩니다(`.gitignore`·`.dockerignore`).
+`data/gov24/` 는 원본·캐시·스냅샷을 **커밋하지 않습니다**(`.gitignore`). 예외는 압축 카탈로그
+`data/gov24/catalog.json.gz` 한 파일입니다 — 배포 환경이 샘플 대신 실데이터로 뜨게 하는
+3.8MB 짜리 산출물입니다. `data/gov24/cache/` 는 git·Docker 양쪽에서 제외됩니다
+(`.gitignore`·`.dockerignore`).
+
+동기화 뒤 압축본을 갱신하려면(원본은 그대로 두고 같은 내용을 gzip 으로):
+
+```bash
+python - <<'PY'
+import gzip, pathlib
+src = pathlib.Path("data/gov24/catalog.json")
+dst = src.with_suffix(".json.gz")
+with src.open("rb") as f, gzip.GzipFile(dst, "wb", compresslevel=9, mtime=0) as g:
+    g.write(f.read())
+print(dst, dst.stat().st_size)
+PY
+```
 
 ---
 
@@ -187,7 +202,7 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
 ├── Dockerfile · render.yaml · server.json      배포·레지스트리 정의
 ├── sync_gov24.py                               편의 실행 파일
 ├── build/gen_regions.py                        시군구 명부 생성(개발용)
-├── data/gov24/                                 동기화 산출물(catalog.json) + snapshots/ — 로컬 생성, 비커밋
+├── data/gov24/                                 catalog.json.gz(배포용 커밋) · 원본 catalog.json·snapshots/(로컬 전용)
 └── src/
     ├── subsidy_kr/
     │   ├── engine.py          결정론 판정(개인 JA 코드 + 창업·기업 자격)

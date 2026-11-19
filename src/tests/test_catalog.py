@@ -1,6 +1,7 @@
 """카탈로그 로딩·정규화 테스트(샘플 ↔ 동기화 산출물)."""
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import shutil
@@ -114,6 +115,74 @@ class SyncedCatalogTest(unittest.TestCase):
     def test_missing_file_is_sample(self):
         catalog = catalog_module.load_catalog(os.path.join(self.tmp, "nope.json"))
         self.assertEqual(catalog.meta["catalog_state"], "sample")
+
+
+class GzipCatalogTest(unittest.TestCase):
+    """`catalog.json.gz` 만 있는 배포 환경(저장소·이미지)에서도 실데이터로 뜽는지."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.json_path = os.path.join(self.tmp, "catalog.json")
+        self.gz_path = self.json_path + ".gz"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _payload(self):
+        raw = dict(sample_data.services()[0])
+        raw["서비스ID"] = "GZ-1"
+        return {"meta": {"generated_on": "2026-11-19T00:00:00+09:00",
+                         "stats": {"services": 1}},
+                "services": [raw]}
+
+    def _write_gzip(self, payload=None):
+        with gzip.GzipFile(self.gz_path, "wb", mtime=0) as handle:
+            handle.write(json.dumps(payload or self._payload(),
+                                    ensure_ascii=False).encode("utf-8"))
+
+    def _write(self, payload):
+        with open(self.json_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+
+    def test_reads_gzip_when_plain_file_is_missing(self):
+        self._write_gzip()
+        catalog = catalog_module.load_catalog(self.json_path)
+        self.assertEqual(catalog.meta["catalog_state"], "synced")
+        self.assertEqual(catalog.meta["data_state"], "live_sync")
+        self.assertEqual(catalog.meta["catalog_file"], "catalog.json.gz")
+        self.assertTrue(catalog.meta["catalog_compressed"])
+        self.assertEqual(catalog.get("GZ-1").source, "gov24")
+
+    def test_gzip_path_can_be_given_directly(self):
+        self._write_gzip()
+        catalog = catalog_module.load_catalog(self.gz_path)
+        self.assertEqual(catalog.meta["catalog_state"], "synced")
+        self.assertIsNotNone(catalog.get("GZ-1"))
+
+    def test_plain_file_wins_over_gzip(self):
+        self._write_gzip()
+        raw = dict(sample_data.services()[0])
+        raw["서비스ID"] = "PLAIN-1"
+        self._write({"meta": {}, "services": [raw]})
+        catalog = catalog_module.load_catalog(self.json_path)
+        self.assertEqual(catalog.meta["catalog_file"], "catalog.json")
+        self.assertFalse(catalog.meta["catalog_compressed"])
+        self.assertIsNone(catalog.get("GZ-1"))
+        self.assertIsNotNone(catalog.get("PLAIN-1"))
+
+    def test_broken_gzip_falls_back_to_sample(self):
+        with open(self.gz_path, "wb") as handle:
+            handle.write(b"not a gzip file")
+        catalog = catalog_module.load_catalog(self.json_path)
+        self.assertEqual(catalog.meta["catalog_state"], "sample")
+        self.assertIn("fallback_reason_ko", catalog.meta)
+        self.assertGreaterEqual(len(catalog.services), 20)
+
+    def test_candidate_order(self):
+        self.assertEqual(catalog_module.catalog_candidates("/d/catalog.json"),
+                         ["/d/catalog.json", "/d/catalog.json.gz"])
+        self.assertEqual(catalog_module.catalog_candidates("/d/catalog.json.gz"),
+                         ["/d/catalog.json.gz"])
 
 
 class NormalizeTest(unittest.TestCase):

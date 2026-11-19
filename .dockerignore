@@ -8,3 +8,5 @@ build
 src/tests
 data/app.sqlite*
 data/gov24/cache
+# data/gov24/catalog.json.gz 는 이미지에 꼭 들어가야 한다(3.8MB — 이 줄을 추가해 제외하지 말 것).
+# 원본 catalog.json·snapshots/ 는 저장소에 없으므로 이미지에도 들어가지 않는다.

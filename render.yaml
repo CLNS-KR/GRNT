@@ -3,10 +3,11 @@
 #
 # 사용법
 #   1) 저장소를 Render 에 연결하고 Blueprint(render.yaml) 선택
-#   2) 배포 후 https://<서비스>.onrender.com/ 확인
-#   3) 실데이터로 바꾸려면 Render Shell 에서
+#   2) 배포 후 https://<서비스>.onrender.com/healthz 확인
+#      — 이미지에 data/gov24/catalog.json.gz(약 3.8MB)가 들어 있어 동기화 없이 12,429건으로 뜽니다.
+#   3) 더 최신 데이터가 필요하면 Render Shell 에서
 #      PYTHONPATH=/app/src python -m subsidy_kr.sync_gov24 --sources all --key <인증키> 를 한 번 실행합니다.
-#      (동기화 산출물은 저장소·이미지에 넣지 않습니다. 무료 플랜은 재배포 시 초기화됩니다.)
+#      (Shell 에서 만든 catalog.json 은 재배포 시 사라집니다. 계속 쓰려면 압축본을 저장소에 다시 커밋해 배포)
 #
 # 주의
 #   - 서버에는 API 키가 필요 없습니다(공개 판정 전용). 키는 동기화 스크립트에서만 씁니다.
