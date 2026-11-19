@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from . import models
@@ -50,7 +51,8 @@ def safe_key(value: Any) -> str:
     return KEY_RE.sub("", str(value or ""))[:MAX_KEY]
 
 
-def _known_paths() -> set:
+@lru_cache(maxsize=1)
+def _known_paths() -> frozenset:
     paths = set(FIXED_PATHS)
     try:
         from . import pseo
@@ -59,7 +61,9 @@ def _known_paths() -> set:
             paths.add(f"/s/{slug}")
     except Exception:  # noqa: BLE001 - 카탈로그가 없어도 카운터는 돌아야 한다
         pass
-    return paths
+    # 요청마다 load_catalog()로 25MB 카탈로그를 다시 읽지 않도록 1회만 계산해 둔다.
+    # 경로 집합은 프로세스 수명 동안 바뀌지 않는다(무료 플랜은 재배포 시 새 프로세스).
+    return frozenset(paths)
 
 
 def path_key(path: str) -> str:

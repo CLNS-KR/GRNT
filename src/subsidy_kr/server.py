@@ -329,6 +329,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, db_path: str = "",
         os.makedirs(directory, exist_ok=True)
     catalog = load_catalog(os.path.join(data_dir, "catalog.json") if data_dir else None)
     store = Store(db_path)
+    usage._known_paths()  # 시작 시 1회 계산해 첫 요청이 카탈로그를 다시 읽지 않게 한다
     httpd = ThreadingHTTPServer((host, port), make_handler(catalog, store))
     print(f"GRNT listening on http://{host}:{port} "
           f"(catalog={catalog.meta.get('catalog_state')}, services={len(catalog.services)}, "
