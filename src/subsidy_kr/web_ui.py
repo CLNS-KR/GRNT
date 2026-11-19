@@ -537,6 +537,7 @@ PAGE_TEMPLATE = """<!doctype html>
   }}
 
   var activeFilter = 'all';
+  var activeKind = 'all';
   var lastData = null;
 
   function renderResults(data){{
@@ -576,6 +577,27 @@ PAGE_TEMPLATE = """<!doctype html>
       counts.appendChild(btn);
     }});
 
+    var kindTabs = {{
+      all: '전체 유형',
+      grant: '지원금·바우처만',
+      program: '교육·건강·프로그램'
+    }};
+    var grantCnt = allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
+    var progCnt = allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
+    var kindCounts = {{ all: allRows.length, grant: grantCnt, program: progCnt }};
+    Object.keys(kindTabs).forEach(function(k){{
+      var kbtn = document.createElement('button');
+      kbtn.type = 'button';
+      kbtn.className = activeKind === k ? 'active' : '';
+      kbtn.style.borderStyle = 'dashed';
+      kbtn.textContent = kindTabs[k] + ' ' + kindCounts[k] + '건';
+      kbtn.addEventListener('click', function(){{
+        activeKind = k;
+        renderResults(lastData);
+      }});
+      counts.appendChild(kbtn);
+    }});
+
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
     var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
     document.getElementById('results-sub').textContent =
@@ -590,14 +612,16 @@ PAGE_TEMPLATE = """<!doctype html>
       box.appendChild(notice);
     }}
 
-    var rows = activeFilter === 'all'
-      ? allRows
-      : activeFilter === 'd7'
-        ? allRows.filter(function(r){{
-            var dl = (((r.application || {{}}).deadline || {{}}).days_left);
-            return dl !== null && dl !== undefined && dl >= 0 && dl <= 7;
-          }})
-        : allRows.filter(function(r){{ return r.verdict && r.verdict.code === activeFilter; }});
+    var rows = allRows.filter(function(r){{
+      if (activeKind === 'grant' && r.benefit_kind === 'program') return false;
+      if (activeKind === 'program' && r.benefit_kind !== 'program') return false;
+      if (activeFilter === 'all') return true;
+      if (activeFilter === 'd7') {{
+        var dl = (((r.application || {{}}).deadline || {{}}).days_left);
+        return dl !== null && dl !== undefined && dl >= 0 && dl <= 7;
+      }}
+      return r.verdict && r.verdict.code === activeFilter;
+    }});
     if (!rows.length) {{
       box.appendChild(el('div', 'empty',
         activeFilter === 'all'
@@ -614,6 +638,7 @@ PAGE_TEMPLATE = """<!doctype html>
       left.appendChild(title);
       left.appendChild(el('p', 'meta', (row.agency || '') +
         ' · ' + (row.field_label || '') +
+        ' · ' + (row.benefit_kind === 'program' ? '교육·건강·프로그램' : '지원금·혜택') +
         (row.region && row.region.label ? ' · ' + row.region.label : '')));
       head.appendChild(left);
       head.appendChild(el('span', 'badge ' + row.verdict.code, row.verdict.label_ko));
@@ -741,6 +766,7 @@ PAGE_TEMPLATE = """<!doctype html>
       payload.keyword = kwEl.value.trim();
     }}
     activeFilter = 'all';
+    activeKind = 'all';
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},

@@ -286,6 +286,8 @@ _NICHE_SPECIAL_KW = (
     "특별귀화", "귀화허가", "노숙인", "마약류 중독", "성범죄피해자",
     "디지털성범죄", "범죄수익환수", "낙동강수계", "금강수계", "영산강수계",
     "한강수계", "섬진강수계", "폐광", "광업자", "북한이탈주민", "탈북민",
+    "입양", "산재근로자", "산재보험", "대지급금", "임금체불", "체불근로자", "장기근속", "중소기업장기근속",
+    "부도 임대주택", "납북피해자",
 )
 _STUDENT_KW = ("고졸 후학습자", "국가장학금", "학자금 대출")
 
@@ -857,6 +859,7 @@ def evaluate_service(service: Service, profile: Dict[str, Any],
         "region": service.region,
         "field": service.field,
         "field_label": service.field_label,
+        "benefit_kind": service.benefit_kind,
         "support_type": service.support_type,
         "track": service.track,
         "track_label": service.track_label,
@@ -1184,10 +1187,11 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     return _copy_result(result)
 
 
-def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
+def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, int, int, str]:
     code = row["verdict"]["code"]
     region_level = (row.get("region") or {}).get("level") or "nationwide"
     region_tier = {"sigungu": 0, "sido": 1}.get(region_level, 2)
+    kind_rank = 0 if row.get("benefit_kind", "grant") == "grant" else 1
     # 내가 입력한 조건(상황·가구·성별·자녀·업종)에 직접 맞물린 제도일수록 우선 노출
     specific_hits = 0
     for r in row.get("why") or []:
@@ -1203,7 +1207,7 @@ def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
         urgency = 1
     else:
         urgency = 2
-    return (models.SORT_INDEX.get(code, 9), -specific_hits, region_tier, urgency, end)
+    return (models.SORT_INDEX.get(code, 9), kind_rank, -specific_hits, region_tier, urgency, end)
 
 
 def evaluate_by_id(catalog: Catalog, service_id: str,

@@ -211,6 +211,38 @@ class Service:
     def field_label(self) -> str:
         return FIELD_LABELS.get(self.field, self.field or "기타")
 
+    @cached_property
+    def benefit_kind(self) -> str:
+        """실질 지원금·바우처·감면(`grant`) vs 교육·강좌·건강·상담 프로그램(`program`)."""
+        st_raw = str(self.support_type or "").strip()
+        st_parts = [p.strip() for p in st_raw.split("||") if p.strip()]
+        program_types = {
+            "기타(교육)", "기타(상담)", "서비스(의료)", "서비스(돌봄)",
+            "시설이용", "지자체 지역사회서비스", "멘토링·컨설팅",
+            "상담/법률지원", "의료지원", "봉사/돌봄",
+        }
+        grant_types = {
+            "현금", "현금(감면)", "이용권", "현금(보험)", "현금(장학금)",
+            "현금(융자)", "자금(융자)", "금융",
+        }
+        if st_parts and all(p in program_types or "상담" in p or "교육" in p or "의료" in p or "돌봄" in p for p in st_parts):
+            return "program"
+        if any(p in program_types for p in st_parts) and not any(p in grant_types for p in st_parts):
+            return "program"
+        program_words = (
+            "캘리그라피", "강좌", "수업", "교실", "아카데미", "강의", "특강",
+            "동아리", "살롱", "캠프", "건강관리", "건강검진", "예방접종",
+            "심리상담", "건강상담", "심리안정", "조력지원", "프로그램", "체험교실", "워크숍", "강습",
+        )
+        grant_words = (
+            "지원금", "보조금", "수당", "장려금", "장학금", "바우처",
+            "이용권", "축하금", "위로금", "감면", "환급", "융자", "대출", "급여",
+        )
+        name_text = str(self.name or "")
+        if any(w in name_text for w in program_words) and not any(w in name_text for w in grant_words):
+            return "program"
+        return "grant"
+
     @property
     def condition_labels(self) -> List[str]:
         return [conditions.describe_code(code) for code in self.conditions]
