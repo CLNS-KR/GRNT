@@ -93,7 +93,7 @@ def _profile_from_args(args: Dict[str, Any]) -> Dict[str, Any]:
 
 def _result_row(row: Dict[str, Any], *, detail: bool = False) -> Dict[str, Any]:
     keys = ("service_id", "name", "agency", "agency_type", "field", "field_label",
-            "region", "support_type", "track", "track_label", "verdict", "why",
+            "benefit_kind", "region", "support_type", "track", "track_label", "verdict", "why",
             "matched_conditions", "missing_information", "criteria_state", "criteria_flags",
             "criteria_excerpt", "amount", "application", "contact", "detail_url",
             "online_url", "tags", "source", "source_label", "attribution_ko",
