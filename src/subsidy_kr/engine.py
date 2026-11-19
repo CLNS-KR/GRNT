@@ -1196,8 +1196,13 @@ def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
                 specific_hits += 1
     deadline = row.get("application", {}).get("deadline") or {}
     end = deadline.get("end_date") or "9999-12-31"
-    # 마감이 임박한 것을 같은 등급 안에서 앞에 둔다.
-    urgency = 0 if deadline.get("closing_soon") else 1
+    days_left = deadline.get("days_left")
+    if days_left is not None and 0 <= days_left <= 7:
+        urgency = 0
+    elif deadline.get("closing_soon"):
+        urgency = 1
+    else:
+        urgency = 2
     return (models.SORT_INDEX.get(code, 9), -specific_hits, region_tier, urgency, end)
 
 

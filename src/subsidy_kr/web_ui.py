@@ -553,12 +553,15 @@ PAGE_TEMPLATE = """<!doctype html>
       all: '전체',
       eligible_likely: '받을 가능성 높음',
       check_needed: '조건 확인 필요',
-      insufficient_info: '정보 부족'
+      insufficient_info: '정보 부족',
+      d7: '마감 D-7 임박'
     }};
-    var rowCounts = {{all: allRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0}};
+    var rowCounts = {{all: allRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0, d7: 0}};
     allRows.forEach(function(r){{
       var c = r.verdict && r.verdict.code;
       if (rowCounts[c] !== undefined) {{ rowCounts[c] += 1; }}
+      var dl = (((r.application || {{}}).deadline || {{}}).days_left);
+      if (dl !== null && dl !== undefined && dl >= 0 && dl <= 7) {{ rowCounts.d7 += 1; }}
     }});
     Object.keys(labels).forEach(function(code){{
       var btn = document.createElement('button');
@@ -589,7 +592,12 @@ PAGE_TEMPLATE = """<!doctype html>
 
     var rows = activeFilter === 'all'
       ? allRows
-      : allRows.filter(function(r){{ return r.verdict && r.verdict.code === activeFilter; }});
+      : activeFilter === 'd7'
+        ? allRows.filter(function(r){{
+            var dl = (((r.application || {{}}).deadline || {{}}).days_left);
+            return dl !== null && dl !== undefined && dl >= 0 && dl <= 7;
+          }})
+        : allRows.filter(function(r){{ return r.verdict && r.verdict.code === activeFilter; }});
     if (!rows.length) {{
       box.appendChild(el('div', 'empty',
         activeFilter === 'all'
@@ -629,6 +637,10 @@ PAGE_TEMPLATE = """<!doctype html>
 
       var deadlineInfo = (row.application || {{}}).deadline || {{}};
       var deadlineLabel = deadlineInfo.label_ko || (row.application || {{}}).deadline_text || '';
+      var dLeft = deadlineInfo.days_left;
+      if (dLeft !== null && dLeft !== undefined && dLeft >= 0 && dLeft <= 7) {{
+        deadlineLabel = 'D-' + dLeft + ' 마감임박' + (deadlineLabel ? ' · ' + deadlineLabel : '');
+      }}
       if (deadlineLabel || row.detail_url || row.online_url) {{
         var quick = el('div', 'card-links');
         if (deadlineLabel) {{
