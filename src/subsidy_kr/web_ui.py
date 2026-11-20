@@ -1095,6 +1095,12 @@ PAGE_TEMPLATE = """<!doctype html>
         <a href="/v1/stats">익명 사용 통계</a>
         <a href="/llms.txt">AI·개발자용 안내</a>
       </div>
+      <p class="sub" style="margin-top:14px"><strong>창업·소상공인</strong>이라면 지원금을 받기 전에 걸리는 규제를 같이 보세요.
+      <strong>프랜차이즈</strong>는 공정위 정보공개서로 브랜드별 평균매출·폐점률·법 위반 이력을
+      <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer">FRNC 프랜차이즈 창업 리스크 체크</a>에서,
+      <strong>수입·유통</strong>은 통관 요건·인증·식약처 이력을
+      <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer">CLNS 수입·유통 규제 체크</a>에서
+      무료로 확인할 수 있습니다.</p>
     </section>
 
     {guides_footer}
@@ -1135,7 +1141,21 @@ PAGE_TEMPLATE = """<!doctype html>
       여전히 저장하지 않습니다.</p>
     </section>
 
+    <section class="card" id="siblings">
+      <h2>같이 쓰는 서비스</h2>
+      <p class="sub">같은 팀이 무료로 운영하는 두 도구입니다. 세 서비스 모두 회원가입·결제가 없고,
+      판정은 정부·공정위가 공개한 원본 자료로만 합니다.</p>
+      <div class="links">
+        <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer"><strong>CLNS</strong> — 수입·유통 규제 체크(세관장확인·KC·식약처·리콜)</a>
+        <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer"><strong>FRNC</strong> — 프랜차이즈 창업 리스크 체크(정보공개서·폐점률)</a>
+      </div>
+    </section>
+
     <p class="foot">
+      <strong>같이 쓰는 서비스</strong> —
+      <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer">CLNS 수입·유통 규제 체크</a> ·
+      <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer">FRNC 프랜차이즈 창업 리스크 체크</a>
+      <br>
       <strong>개인정보</strong> — <strong>판정 입력으로는</strong> 이름·주민등록번호·전화번호를
       받지 않습니다. 입력한 나이·지역·소득구간·사업자 조건은 판정 계산에만 쓰고 서버에 저장하지 않습니다
       (브라우저 저장소도 쓰지 않음). 서버에는 툴 이름과 판정 등급의 <em>익명 일별 횟수</em>만
