@@ -1,0 +1,122 @@
+# GRNT — 지원금 카탈로그 자동 갱신 (마감 공고 만료 인덱스 회전)
+#
+# 왜 필요한가
+#   `data/gov24/catalog.json.gz` 는 배포 이미지에 들어 있는 실데이터입니다. 그대로 두면
+#   마감된 공고가 "열림"으로 남고, `catalog.sqlite` 의 만료 플래그도 이미지를 구운 날짜에
+#   머뭅니다. 이 워크플로가 하루 한 번 재수집(보조금24·K-Startup·기업마당 + 지자체 자체
+#   복지포털) → 오늘 기준 인덱스 재생성 → 내용이 바뀐 경우에만 압축본을 커밋해 그
+#   드리프트를 없앱니다.
+#
+# 무엇을 커밋하나
+#   `data/gov24/catalog.json.gz` 한 파일(약 3.8MB, 저장소가 추적하는 유일한 산출물)만.
+#   `catalog.sqlite`(약 49MB)는 배포 때 압축본에서 다시 만들어지므로 기본은 커밋하지
+#   않습니다 — 매일 49MB 씩 쌓이면 1년에 1.4GB 로 저장소가 비대해집니다.
+#   그래도 인덱스 파일 자체를 저장소에 두고 싶으면 Actions 화면에서 이 워크플로를
+#   수동 실행하며 `commit_sqlite` 를 체크하세요(그때만 `git add -f`).
+#
+# 준비물
+#   저장소 Secrets 에 `DATA_GO_KR_SERVICE_KEY` 를 넣으면 실제 재수집을 합니다
+#   (15113968 보조금24 · 15125364 K-Startup · 15157820 기업마당 — 모두 자동승인).
+#   시크릿이 없으면 네트워크를 건너뛰고 지금 있는 카탈로그로 만료 인덱스만 다시 만듭니다
+#   (워크플로는 성공으로 끝나고, 커밋은 생기지 않습니다).
+#
+# 실행 시각
+#   19:00 UTC = 04:00 KST. Actions 의 cron 은 UTC 기준입니다.
+name: refresh-catalog
+
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+    inputs:
+      commit_sqlite:
+        description: "catalog.sqlite(약 49MB)도 함께 커밋 (기본: 압축본만)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write          # 갱신된 압축본을 커밋·푸시하기 위해 필요
+
+concurrency:
+  group: refresh-catalog
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 테스트 (네트워크 불필요)
+        working-directory: src
+        run: python -m unittest discover -s tests -q
+
+      - name: 카탈로그 갱신 (재수집 → 만료 인덱스 → 압축본)
+        env:
+          PYTHONPATH: src
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+        run: |
+          set -uo pipefail
+          status=0
+          # --json: 요약을 파일로 남겨 아래 요약 단계와 실패 판단에 함께 쓴다.
+          python -m subsidy_kr.refresh_catalog --sources all --json > refresh-report.json || status=$?
+          cat refresh-report.json || true
+          if [ "$status" -ne 0 ]; then
+            echo "::error::카탈로그 갱신 실패 (exit $status)"
+            exit "$status"
+          fi
+
+      - name: 실행 요약
+        if: always()
+        run: |
+          set -uo pipefail
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          path = pathlib.Path("refresh-report.json")
+          if not path.exists():
+              print("## 카탈로그 갱신 실패\n\n보고서 파일이 없습니다.")
+              raise SystemExit(0)
+          report = json.loads(path.read_text(encoding="utf-8"))
+          index = report.get("index") or {}
+          changes = report.get("changes") or {}
+          print(f"## 카탈로그 갱신 — {report.get('state')} ({report.get('day')})")
+          if report.get("state") == "no_catalog":
+              print(f"\n{report.get('message')}")
+              raise SystemExit(0)
+          print(f"\n- 카탈로그: {report.get('catalog', {}).get('services', 0):,}건"
+                f" (파일 {report.get('catalog', {}).get('source_file')})")
+          print(f"- 만료 인덱스: 만료 {index.get('expired', 0):,} · 모집마감 "
+                f"{index.get('closed_business', 0):,} · 열림 {index.get('open_total', 0):,}"
+                f" (개인 {index.get('open_personal', 0):,} / 창업 {index.get('open_business', 0):,})")
+          print(f"- 변경: 카탈로그 {'O' if changes.get('catalog_json_changed') else 'X'}"
+                f" · 압축본 {'O' if changes.get('gzip_changed') else 'X'}"
+                f" · 인덱스 {'O' if changes.get('index_rebuilt') else 'X'}")
+          for warning in report.get("warnings") or []:
+              print(f"- ⚠️ {warning}")
+          PY
+
+      - name: 바뀐 산출물 커밋
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/gov24/catalog.json.gz
+          if [ "${{ inputs.commit_sqlite }}" = "true" ]; then
+            # 기본 .gitignore 가 data/gov24/* 를 막으므로 강제로 넣는다(수동 실행 전용).
+            git add -f data/gov24/catalog.sqlite
+          fi
+          if git diff --cached --quiet; then
+            echo "바뀐 산출물이 없습니다 — 커밋하지 않습니다."
+            exit 0
+          fi
+          git commit -m "chore(data): 카탈로그 자동 갱신 $(TZ=Asia/Seoul date +%F)"
+          git push
