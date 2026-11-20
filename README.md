@@ -305,6 +305,34 @@ print(dst, dst.stat().st_size)
 PY
 ```
 
+### 4-1. 매일 자동 갱신 — `refresh_catalog`
+
+`catalog.json.gz` 를 그대로 두면 마감된 공고가 "열림"으로 남고, `catalog.sqlite` 의 만료
+플래그도 이미지를 구운 날에 머뭅니다. `refresh_catalog` 는 재수집 → **오늘 기준 만료 인덱스
+재생성** → (내용이 바뀐 경우만) 압축본 갱신을 한 번에 처리합니다.
+
+```bash
+DATA_GO_KR_SERVICE_KEY=... PYTHONPATH=src python -m subsidy_kr.refresh_catalog   # 재수집+인덱스+압축본
+PYTHONPATH=src python -m subsidy_kr.refresh_catalog --offline                     # 네트워크 없이 만료 인덱스만 회전
+PYTHONPATH=src python -m subsidy_kr.refresh_catalog --dry-run --json              # 무엇이 바뀔지만 확인
+```
+
+- 재수집이 일부 실패해도 **기존 카탈로그를 보존**하고 진행합니다(부분 실패 허용).
+  인증키가 없으면 자동으로 오프라인 경로로 떨어져 만료 인덱스만 다시 만듭니다.
+  `sync_gov24` 의 7일 응답 캐시는 기본으로 무시하고 매번 새로 받습니다(`--ttl-days` 로 완화).
+- 지자체 자체 복지포털(부평복지ON·인천 맞춤형수혜·인천 1인가구·서울 WIS·경기민원24·세종·브라보)
+  도 함께 다시 받습니다. 포털 하나가 0건이면 **그 포털 항목만** 기존 것을 유지합니다
+  (포털 개편·차단은 흔한 실패라, 조용히 카탈로그가 줄어드는 것을 막습니다). `--no-local` 로 끕니다.
+- 지자체 포털 행은 서비스ID 접두어(`BOKJION`·`ICBENEFIT`·`IC1IN`·`SEOULWIS`·`GG24`·`SEJONG`·`BROSO`)
+  로 구분해 같은 제도를 두 번 담지 않습니다.
+- 압축본은 **내용이 바뀌었을 때만** 씁니다(압축을 풀어 비교 — gzip mtime·압축레벨 차이로
+  매일 커밋이 생기는 일을 막습니다).
+- 종료코드: `0` = 갱신 또는 인덱스 재생성 완료(부분 실패 포함), `1` = 쓸 카탈로그가 없음.
+- `.github/workflows/refresh-catalog.yml` 이 매일 `0 19 * * *` UTC(04:00 KST)에 돌고,
+  바뀐 `data/gov24/catalog.json.gz` 만 커밋합니다(`contents: write`). `catalog.sqlite`(49MB)는
+  기본 커밋하지 않습니다 — 배포 때 압축본에서 다시 만들어지고, 매일 쌓으면 저장소가 1년에
+  약 1.4GB 커집니다. 필요하면 워크플로를 수동 실행하며 `commit_sqlite` 를 켜면 됩니다.
+
 ---
 
 ## 5. 구조
@@ -328,6 +356,7 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── bizinfo.py         15157820 기업마당 클라이언트
     │   ├── datagokr.py        공통 전송·키 마스킹·응답 봉투 해석
     │   ├── sync_gov24.py      통합 동기화 CLI(+스냅샷)
+    │   ├── refresh_catalog.py 자동 갱신(재수집 → 오늘 기준 만료 인덱스 → 압축본)
     │   ├── snapshots.py       일자별 스냅샷·변경 비교
     │   ├── cache.py           JSON 캐시(7일 TTL, 원자적 쓰기)
     │   ├── store.py           SQLite(스냅샷·익명 카운터)
@@ -389,12 +418,20 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
 | 쿠키·localStorage | 쓰지 않음 |
 | 서버 로그 | 경로·상태코드만(질의문·본문 미기록) |
 | 통계 | 날짜·경로·툴명·판정 등급·0건/오류 **횟수**만 |
+| 0건 검색어 | **결과가 0건이었던 검색어만**, 전화번호·주민등록번호·이메일·URL·@핸들·2자리 이상 숫자·시·도/시·군·구 이름을 지운 뒤 최대 30자 |
 | 스냅샷 | 제도 정보만(프로필·질의문 없음) |
 | 외부 전송 | 없음(서버가 공공 API를 대신 호출하지 않음 — 동기화는 오프라인 배치) |
 
 공고문 원문에 포함된 **기관 담당자 이메일·전화**는 공개된 기관 연락처로, 사용자 개인정보와 다릅니다.
 `src/`·문서·설정에는 이메일·전화·실명을 쓰지 않으며 테스트가 이를 검사합니다.
 다만 그 연락처가 담긴 동기화 산출물(`data/gov24/`)은 저장소·이미지에 넣지 않습니다.
+
+검색어는 **결과가 0건일 때만** 남깁니다 — 결과가 있던 검색어는 저장하지 않습니다. 남길 때도
+숫자(나이·연도)·전화번호·주민번호·이메일·URL·@핸들과 시·도/시·군·구 이름을 지우고 30자로
+자릅니다(예: `인천 서구 청년 월세` → `청년 월세`). 이 집계는 "사람들이 찾는데
+없는 제도"를 드러내 다음 데이터 확충의 근거로만 쓰이고, `/v1/stats` 에 일별 상위 20개로
+노출됩니다. 프로필 입력값(나이·소득구간·임신 여부)은 이 경로에서도 읽지 않습니다.
+사람 이름·상호는 낱말만으로 판별할 수 없어 지우지 못합니다(입력란에 제도·분야 낱말 예시를 둡니다).
 
 ## 8. 배포
 
@@ -405,6 +442,11 @@ docker build -t grnt . && docker run -p 8787:8787 grnt   # 기본은 내장 샘�
 **Render** — `render.yaml` Blueprint 로 그대로 배포합니다(서비스명 `grnt-kr` → `https://grnt-kr.onrender.com`, Docker, free, singapore,
 healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없이도 뜹니다.
 
+무료 플랜은 영구 디스크가 없어 재배포 시 익명 카운터·스냅샷이 초기화됩니다. 외부 유료 DB
+없이 통계를 살리려면 영속 디스크(예: Render Disk)를 붙이고 `GRNT_STATS_PATH` 를 그 안의
+파일로 지정하세요. 백업은 `GET /v1/stats?days=30` 의 JSON 을 받아 두거나 그 SQLite 파일을
+복사하면 됩니다(엔드포인트 구조는 그대로라 기존 소비자가 깨지지 않습니다).
+
 | 항목 | 값 |
 |---|---|
 | Runtime | Docker (`./Dockerfile`, context `.`) |
@@ -412,6 +454,7 @@ healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없�
 | 환경변수(기본) | `PUBLIC_BASE_URL=https://grnt-kr.onrender.com` · `SUBSIDY_KR_DATA=/app/data/gov24` · `SUBSIDY_KR_DB=/app/data/app.sqlite` |
 | 환경변수(실데이터 동기화 시에만) | `DATA_GO_KR_SERVICE_KEY` — 서버 기동에는 불필요, Render Shell 동기화에만 |
 | 환경변수(검색엔진 소유확인, 선택) | `GOOGLE_SITE_VERIFICATION` · `NAVER_SITE_VERIFICATION` · `SITE_VERIFICATION_FILES` — 아래 8-1 |
+| 환경변수(통계 보존, 선택) | `GRNT_STATS_PATH` — 익명 카운터만 따로 둘 SQLite 경로. 비어 있으면 `SUBSIDY_KR_DB` |
 
 ### 8-1. 검색엔진 소유확인(구글 서치콘솔·네이버 서치어드바이저)
 

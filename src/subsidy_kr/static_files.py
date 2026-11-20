@@ -97,7 +97,7 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
 - [질문형 가이드]({root}/guides/): \"청년 월세 지원 조건\" 같은 질문 {guide_count}개에
   한 줄 기준·확인 조건·지금 열린 공고·흔한 오해를 붙인 페이지. FAQPage 구조화 데이터 포함.
 - [서비스·데이터 상태]({root}/v1/meta): 카탈로그 상태, 판정 등급 정의, 두 트랙·자격 코드·출처.
-- [익명 사용 통계]({root}/v1/stats): IP·쿠키·프로필을 저장하지 않은 일별 호출 수.
+- [익명 사용 통계]({root}/v1/stats): IP·쿠키·프로필을 저장하지 않은 일별 호출 수와, 결과가 0건이었던 검색어(지역명·연락처·숫자를 지운 30자 이내) 상위 목록.
 
 ## 기계용 (MCP · JSON-RPC 2.0)
 - [MCP 엔드포인트]({root}/mcp): POST. `initialize` → `tools/list` → `tools/call`. 인증 불필요,

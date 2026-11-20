@@ -499,7 +499,11 @@ def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = N
             "stores_profile": False,
             "requires_login": False,
             "requires_resident_number": False,
-            "counter_granularity": "일별 · 툴 · 판정 등급 (IP·쿠키·프로필 미저장)",
+            "counter_granularity": (
+                "일별 · 툴 · 판정 등급 (IP·쿠키·프로필 미저장). 결과가 0건이었던 검색어만 "
+                "지역명·연락처·숫자를 지운 뒤 최대 30자로 남깁니다."
+            ),
+            "stats_url": static_files.base_url() + "/v1/stats",
         },
         "scope_limits_ko": SCOPE_LIMITS_KO,
         "guides": {
@@ -922,7 +926,7 @@ def call_tool(name: str, arguments: Optional[Dict[str, Any]], catalog: Catalog,
     except Exception as exc:  # noqa: BLE001 - 공개 배포에서 내부 정보를 노출하지 않는다
         result = {"tool": name, "ok": False, "error": "internal_error",
                   "message": type(exc).__name__}
-    usage.record_tool(store, name, result)
+    usage.record_tool(store, name, result, arguments)
     return result
 
 

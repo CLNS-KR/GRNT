@@ -5,6 +5,7 @@
 - `HOST`(기본 0.0.0.0) · `PORT`(기본 8787)
 - `SUBSIDY_KR_DATA` 동기화 카탈로그 디렉터리(기본 `data/gov24`)
 - `SUBSIDY_KR_DB`   카운터·스냅샷 SQLite(기본 `data/app.sqlite`)
+- `GRNT_STATS_PATH` 익명 카운터만 따로 둘 SQLite 경로(영속 디스크·백업용, 선택)
 - `PUBLIC_BASE_URL` robots/llms/sitemap 의 공개 주소
 - `GOOGLE_SITE_VERIFICATION`·`NAVER_SITE_VERIFICATION` 구글·네이버 소유확인 메타태그 값
 - `SITE_VERIFICATION_FILES` 루트에 서빙할 확인 파일 JSON(`{"naverXXXX.html": "..."}`)
@@ -83,6 +84,15 @@ def default_db_path() -> str:
     return os.path.join(project_root(), "data", "app.sqlite")
 
 
+def default_stats_path() -> str:
+    """익명 카운터 SQLite 경로 — `GRNT_STATS_PATH` 가 있으면 그곳(영속 디스크)을 쓴다.
+
+    무료 플랜은 영구 디스크가 없어 재배포 시 카운터가 초기화된다. 외부 유료 DB 없이
+    살리려면 Render 디스크(또는 다른 영속 볼륨)를 `GRNT_STATS_PATH` 로 마운트하면 된다.
+    """
+    return os.path.join(project_root(), "data", "app.sqlite")
+
+
 def _int_env(value: Optional[str], fallback: int) -> int:
     try:
         parsed = int(str(value).strip())
@@ -93,10 +103,13 @@ def _int_env(value: Optional[str], fallback: int) -> int:
 
 def config_from_env(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     env = os.environ if env is None else env
+    db_path = (env.get("SUBSIDY_KR_DB") or "").strip() or default_stats_path()
+    stats_path = (env.get("GRNT_STATS_PATH") or "").strip() or db_path
     return {
         "host": (env.get("HOST") or DEFAULT_HOST).strip() or DEFAULT_HOST,
         "port": _int_env(env.get("PORT"), DEFAULT_PORT),
-        "db_path": (env.get("SUBSIDY_KR_DB") or "").strip() or default_db_path(),
+        "db_path": db_path,
+        "stats_path": stats_path,
         "data_dir": data_dir_from_env(),
     }
 
@@ -511,8 +524,9 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
 
 
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, db_path: str = "",
-          data_dir: Optional[str] = None) -> None:
-    db_path = db_path or default_db_path()
+          data_dir: Optional[str] = None, stats_path: str = "") -> None:
+    # 카운터는 `GRNT_STATS_PATH`(영속 디스크) → `SUBSIDY_KR_DB` → data/app.sqlite 순으로 둔다.
+    db_path = stats_path or db_path or default_stats_path()
     directory = os.path.dirname(os.path.abspath(db_path))
     if directory:
         os.makedirs(directory, exist_ok=True)
@@ -544,7 +558,8 @@ def main(argv: Optional[list] = None) -> int:
     args = parser.parse_args(argv)
     cfg = config_from_env()
     serve(host=args.host or cfg["host"], port=args.port if args.port is not None else cfg["port"],
-          db_path=args.db or cfg["db_path"], data_dir=args.data_dir or cfg["data_dir"])
+          db_path=args.db or cfg["db_path"], data_dir=args.data_dir or cfg["data_dir"],
+          stats_path=cfg["stats_path"])
     return 0
 
 

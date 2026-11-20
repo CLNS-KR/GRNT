@@ -127,6 +127,92 @@ class SyncAllTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(snap_dir, "index.json")))
         self.assertEqual(len(os.listdir(snap_dir)), 2)     # 스냅샷 1장 + index
 
+    def test_local_portals_are_merged(self):
+        """지자체 자체 복지포털 행도 카탈로그·메타에 함께 들어간다."""
+        from subsidy_kr import local_portals
+
+        original = local_portals.collect_all_local_portals
+        local_portals.collect_all_local_portals = lambda **_kwargs: {
+            "records": [{"서비스ID": "LOC-1", "서비스명": "부평 청년 수당",
+                         "소관기관명": "부평구청", "지원대상": "부평구 청년",
+                         "지원내용": "월 10만 원", "신청기한": "상시",
+                         "source": "local_portal"}],
+            "counts": {"bupyeong_bokjion": 1, "total_deduped": 1},
+        }
+        try:
+            report = sync_gov24.sync_all("TESTKEY", data_dir=self.tmp, force=True,
+                                         include_local_portals=True)
+        finally:
+            local_portals.collect_all_local_portals = original
+        self.assertTrue(report["ok"])
+        with open(os.path.join(self.tmp, "catalog.json"), encoding="utf-8") as handle:
+            payload = json.load(handle)
+        ids = {row["서비스ID"] for row in payload["services"]}
+        self.assertIn("LOC-1", ids)
+        self.assertEqual(payload["meta"]["local_portal_counts"]["total_deduped"], 1)
+        self.assertEqual(report["sources"]["local_portal"]["services"], 1)
+        self.assertIn("지자체", payload["meta"]["source"])
+
+    def test_local_portal_failure_keeps_existing_rows(self):
+        """포털이 막혀도 이미 있던 지자체 항목을 지우지 않는다(부분 실패 허용)."""
+        from subsidy_kr import local_portals
+
+        with open(os.path.join(self.tmp, "catalog.json"), "w", encoding="utf-8") as handle:
+            json.dump({"meta": {"catalog_state": "synced"},
+                       "services": [{"서비스ID": "LOC-OLD", "서비스명": "기존 지자체 제도",
+                                     "소관기관명": "연수구청", "지원대상": "연수구 주민",
+                                     "지원내용": "바우처", "신청기한": "상시",
+                                     "source": "local_portal"}]},
+                      handle, ensure_ascii=False)
+
+        def boom(**_kwargs):
+            raise RuntimeError("portal blocked")
+
+        original = local_portals.collect_all_local_portals
+        local_portals.collect_all_local_portals = boom
+        try:
+            report = sync_gov24.sync_all("TESTKEY", data_dir=self.tmp, force=True,
+                                         include_local_portals=True)
+        finally:
+            local_portals.collect_all_local_portals = original
+        self.assertTrue(report["ok"])
+        with open(os.path.join(self.tmp, "catalog.json"), encoding="utf-8") as handle:
+            ids = {row["서비스ID"] for row in json.load(handle)["services"]}
+        self.assertIn("LOC-OLD", ids)
+        self.assertIn("기존유지", report["sources"]["local_portal"]["state"])
+        self.assertTrue(any("지자체 포털" in warning for warning in report["warnings"]))
+
+    def test_local_portal_partial_failure_keeps_that_portal(self):
+        """포털 하나가 0건이면 그 포털 행만 기존 것을 유지하고, 받은 포털은 새 것으로 교체한다."""
+        from subsidy_kr import local_portals
+
+        with open(os.path.join(self.tmp, "catalog.json"), "w", encoding="utf-8") as handle:
+            json.dump({"meta": {"catalog_state": "synced"},
+                       "services": [
+                           {"서비스ID": "SEOULWIS-1", "서비스명": "서울 기존 제도",
+                            "소관기관명": "서울특별시 (서울복지포털)", "source": "local_portal"},
+                           {"서비스ID": "BOKJION-1", "서비스명": "부평 옛 제도",
+                            "소관기관명": "인천광역시 부평구 (부평복지ON)", "source": "local_portal"},
+                       ]}, handle, ensure_ascii=False)
+
+        original = local_portals.collect_all_local_portals
+        local_portals.collect_all_local_portals = lambda **_kwargs: {
+            "records": [{"서비스ID": "BOKJION-2", "서비스명": "부평 새 제도",
+                         "소관기관명": "인천광역시 부평구 (부평복지ON)", "source": "local_portal"}],
+            "counts": {"bupyeong_bokjion": 1, "seoul_wis": 0},
+        }
+        try:
+            report = sync_gov24.sync_all("TESTKEY", data_dir=self.tmp, force=True,
+                                         include_local_portals=True)
+        finally:
+            local_portals.collect_all_local_portals = original
+        with open(os.path.join(self.tmp, "catalog.json"), encoding="utf-8") as handle:
+            ids = {row["서비스ID"] for row in json.load(handle)["services"]}
+        self.assertIn("BOKJION-2", ids)      # 새로 받은 포털은 교체
+        self.assertNotIn("BOKJION-1", ids)
+        self.assertIn("SEOULWIS-1", ids)     # 0건이었던 포털은 기존 유지
+        self.assertIn("SEOULWIS", report["sources"]["local_portal"]["counts"]["kept_from_previous"])
+
     def test_second_run_reports_changes(self):
         sync_gov24.sync_all("TESTKEY", data_dir=self.tmp, force=True)
         # 하루 전 스냅샷을 흉내 낸다(공고 1건이 빠진 상태).

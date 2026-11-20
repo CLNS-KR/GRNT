@@ -1,14 +1,23 @@
 """익명 일별 사용 카운터.
 
 남기는 것: `날짜(KST) · 경로 · 툴 이름 · 판정 등급 · 0건/오류 여부`의 **횟수**만.
+그리고 **0건으로 끝난 검색어만** 예외적으로 비식별 처리해 남깁니다(아래 `sanitize_query`).
 남기지 않는 것: IP, X-Forwarded-For, User-Agent, 쿠키, Referer, 세션, 프로필,
-질의문, 서비스ID 목록. 집계 키는 서버가 아는 값으로만 제한하고, 모르는 경로는 `/404`
-한 칸으로 뭉갭니다(임의 문자열이 통계에 남지 않게).
+서비스ID 목록, 결과가 있던 검색어. 집계 키는 서버가 아는 값으로만 제한하고, 모르는
+경로는 `/404` 한 칸으로 뭉갭니다(임의 문자열이 통계에 남지 않게).
+
+0건 검색어를 남기는 이유
+------------------------
+"찾는 제도가 없다"는 사실은 다음 데이터 확충의 유일한 신호입니다. 다만 검색어에는
+지역·나이·연락처가 섞여 들어오므로 **결과가 0건일 때만**, 다음을 지운 뒤 최대 30자로
+남깁니다: 전화번호·주민등록번호·이메일·URL·@핸들, 2자리 이상 숫자, 시·도/시·군·구 이름.
+프로필 입력값(나이·소득구간·임신 여부 등)은 검색어와 무관하게 저장하지 않습니다.
 
 한계: 무료 플랜은 영구 디스크가 없어 재배포 시 0으로 돌아갑니다(일별 집계라 감수).
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -24,6 +33,7 @@ KIND_PATH = "path"
 KIND_TOOL = "tool"
 KIND_VERDICT = "verdict"
 KIND_FLAG = "flag"
+KIND_ZERO_QUERY = "zero_query"
 
 FLAG_ZERO = "zero_results"
 FLAG_ERROR = "errors"
@@ -40,6 +50,23 @@ FIXED_PATHS = (
 KEY_RE = re.compile(r"[^0-9A-Za-z._:/{}-]")
 MAX_KEY = 64
 
+# 0건 검색어 — 남기는 형태를 여기서만 정한다.
+MAX_QUERY_CHARS = 30      # 저장하는 검색어 최대 길이
+TOP_ZERO_QUERIES = 20     # 날짜별로 노출하는 상위 개수(전체 개수는 total/distinct 로 따로)
+TRACKS = ("personal", "business", "all")
+
+_EMAIL_RE = re.compile(r"[0-9A-Za-z._%+\-]+@[0-9A-Za-z.\-]+\.[A-Za-z]{2,}")
+_URL_RE = re.compile(r"(?i)(?:https?://|www\.)\S+")
+_HANDLE_RE = re.compile(r"@[0-9A-Za-z._\-]+")
+_RRN_RE = re.compile(r"\d{6}\s?-?\s?\d{7}")
+_PHONE_RE = re.compile(r"0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}")
+_DIGITS_RE = re.compile(r"\d{2,}")          # 2자리 이상 숫자는 나이·연도일 수 있다
+_ALLOWED_RE = re.compile(r"[^0-9A-Za-z가-힣\s·+&]")
+_SPACE_RE = re.compile(r"\s+")
+_HAS_LETTER_RE = re.compile(r"[가-힣]")
+_HAS_WORD_RE = re.compile(r"[A-Za-z]{2,}")
+_HAS_ANY_RE = re.compile(r"[0-9A-Za-z가-힣]")
+
 
 def today_kst() -> str:
     return datetime.now(KST).strftime("%Y-%m-%d")
@@ -51,6 +78,162 @@ def _shift(day: str, days: int) -> str:
 
 def safe_key(value: Any) -> str:
     return KEY_RE.sub("", str(value or ""))[:MAX_KEY]
+
+
+@lru_cache(maxsize=1)
+def _region_terms() -> tuple:
+    """검색어에서 지울 시·도·시·군·구 이름(긴 것부터).
+
+    지역은 프로필 입력값이면서 동시에 사람을 좁히는 단서입니다. 검색어에 섞여 들어와도
+    통계에는 남기지 않습니다(예: '인천 서구 청년 월세' → '청년 월세').
+    """
+    terms = set()
+    try:
+        from . import regions
+        from .regions_data import SIGUNGU_BY_SIDO
+
+        for name in regions.sido_names():
+            terms.add(name)
+            for suffix in ("특별시", "광역시", "특별자치시", "특별자치도", "도"):
+                if name.endswith(suffix) and len(name) > len(suffix) + 1:
+                    terms.add(name[: -len(suffix)])
+        terms.update(regions.SIDO_ALIASES.keys())
+        for name in regions.SIGUNGU_ALIASES:
+            terms.add(name)
+        for rows in SIGUNGU_BY_SIDO.values():
+            for _code, label in rows:
+                terms.add(label)
+                if len(label) >= 3:      # '수원시' → '수원', '강남구' → '강남'
+                    terms.add(label[:-1])
+                head = label.split()[0]  # '수원시 장안구' → '수원시'
+                if head != label:
+                    terms.add(head)
+                    if len(head) >= 3:
+                        terms.add(head[:-1])
+    except Exception:  # noqa: BLE001 - 지역 명부가 없어도 카운터는 돌아야 한다
+        pass
+    return tuple(sorted((term for term in terms if len(term) >= 2),
+                        key=len, reverse=True))
+
+
+@lru_cache(maxsize=1)
+def _tag_words() -> tuple:
+    """분야 추론용 규칙((슬러그, 낱말들)) — 카탈로그의 TAG_RULES 와 같은 표를 쓴다."""
+    try:
+        from .catalog import TAG_RULES
+
+        return tuple((slug, tuple(str(word).lower() for word in words if word))
+                     for slug, _label, words in TAG_RULES)
+    except Exception:  # noqa: BLE001
+        return ()
+
+
+def infer_tag(query: str) -> str:
+    """검색어에서 분야 태그를 추론한다(사용자가 분야을 고르지 않아도 통계에 남기기 위해).
+
+    검색어 자체에서만 뽑으므로 추가 개인정보가 생기지 않는다.
+    """
+    text = str(query or "").lower()
+    if not text:
+        return ""
+    for slug, words in _tag_words():
+        if any(word in text for word in words):
+            return slug
+    return ""
+
+
+@lru_cache(maxsize=1)
+def _tag_labels() -> dict:
+    try:
+        from .catalog import TAG_RULES
+
+        return {slug: label for slug, label, _words in TAG_RULES}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _is_region_token(token: str, terms: tuple) -> bool:
+    """토큰이 지역명만으로 이루어졌는지(‘인천서구’, ‘수원시’, ‘서해구청’)."""
+    rest = token
+    for _ in range(6):        # 지역명이 최대 여러 개 붙는 경우만 본다
+        if not rest:
+            return True
+        if rest in ("청", "시청", "구청", "군청"):
+            return True
+        for term in terms:    # 긴 이름부터
+            if rest.startswith(term):
+                rest = rest[len(term):]
+                break
+        else:
+            return False
+    return not rest
+
+
+def _strip_regions(text: str) -> str:
+    """지역명만 남은 토큰을 통째로 지운다.
+
+    낱말 가운데 들어 있는 지역명은 지우지 않습니다 — ‘무주택’의 ‘무주(茂朱)’처럼
+    다른 뜻으로 쓰인 말까지 없애면 통계가 쓸모없어집니다.
+    """
+    terms = _region_terms()
+    kept = [token for token in text.split() if not _is_region_token(token, terms)]
+    return " ".join(kept)
+
+
+def sanitize_query(text: Any, limit: int = MAX_QUERY_CHARS) -> str:
+    """검색어 → 통계에 남겨도 되는 비식별 형태(최대 `limit`자).
+
+    남는 것이 없으면 빈 문자열을 돌려주고, 호출자는 그때 기록하지 않습니다.
+    """
+    raw = str(text or "")[:400]
+    raw = _URL_RE.sub(" ", raw)
+    raw = _EMAIL_RE.sub(" ", raw)
+    raw = _HANDLE_RE.sub(" ", raw)
+    raw = _RRN_RE.sub(" ", raw)
+    raw = _PHONE_RE.sub(" ", raw)
+    raw = _ALLOWED_RE.sub(" ", raw)
+    raw = _strip_regions(raw)
+    raw = _DIGITS_RE.sub("N", raw)
+    raw = _SPACE_RE.sub(" ", raw).strip()
+    # 숫자만 있던 토큰은 'N' 한 글자로 남는다 — 뜻이 없으니 버린다.
+    raw = " ".join(token for token in raw.split() if token.strip("N"))
+    if len(raw) > limit:
+        raw = raw[:limit].strip()
+    # 숫자 자리표시자만 남았거나(='N'만) 아무 글자도 없으면 기록하지 않는다.
+    if not raw or not _HAS_ANY_RE.search(raw):
+        return ""
+    if not _HAS_LETTER_RE.search(raw) and not _HAS_WORD_RE.search(raw):
+        return ""
+    return raw
+
+
+def safe_tag(value: Any) -> str:
+    """분야(tag)는 카탈로그가 아는 슬러그만 남긴다(임의 문자열 유입 차단)."""
+    tag = str(value or "").strip()
+    return tag if tag in _tag_labels() else ""
+
+
+def zero_query_key(query: str, track: str = "all", tag: str = "") -> str:
+    """0건 검색어 1건의 저장 키 — 검색어·트랙·분야를 JSON 한 줄로 묶는다."""
+    payload = {"q": str(query or "")[:MAX_QUERY_CHARS],
+               "t": track if track in TRACKS else "all",
+               "g": safe_tag(tag)}
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def zero_entry(key: Any) -> Optional[tuple]:
+    """저장 키 → `(검색어, 트랙, 분야)`. 읽을 수 없으면 None."""
+    try:
+        parsed = json.loads(str(key or ""))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    query = str(parsed.get("q") or "")
+    if not query:
+        return None
+    track = parsed.get("t") if parsed.get("t") in TRACKS else "all"
+    return query[:MAX_QUERY_CHARS], str(track), safe_tag(parsed.get("g"))
 
 
 @lru_cache(maxsize=1)
@@ -107,7 +290,29 @@ def _is_zero_result(name: str, result: Any) -> bool:
     return False
 
 
-def record_tool(store: Any, name: str, result: Any, day: Optional[str] = None) -> None:
+def record_zero_query(store: Any, args: Any, result: Any, day: Optional[str] = None) -> None:
+    """결과가 0건인 검색만 비식별 검색어로 남긴다(프로필 값은 보지도 않는다)."""
+    if store is None or not isinstance(args, dict):
+        return
+    keyword = str(args.get("keyword") or args.get("q") or "").strip()
+    if not keyword:
+        return
+    query = sanitize_query(keyword)
+    if not query:
+        return
+    data = result if isinstance(result, dict) else {}
+    payload = data.get("result") if isinstance(data.get("result"), dict) else {}
+    track = str(payload.get("track") or args.get("track") or "all")
+    tag = safe_tag(args.get("tag")) or infer_tag(query)
+    try:
+        store.bump_usage(day or today_kst(), KIND_ZERO_QUERY,
+                         zero_query_key(query, track, tag))
+    except Exception:  # noqa: BLE001 - 계측 실패가 응답을 막지 않는다
+        pass
+
+
+def record_tool(store: Any, name: str, result: Any, args: Any = None,
+                day: Optional[str] = None) -> None:
     if store is None:
         return
     stamp = day or today_kst()
@@ -131,6 +336,7 @@ def record_tool(store: Any, name: str, result: Any, day: Optional[str] = None) -
             store.bump_usage(stamp, KIND_FLAG, FLAG_ERROR)
         elif _is_zero_result(key, data):
             store.bump_usage(stamp, KIND_FLAG, FLAG_ZERO)
+            record_zero_query(store, args, data, stamp)
         meta = payload.get("catalog") if isinstance(payload, dict) else None
         if isinstance(meta, dict) and meta.get("catalog_state") == "sample":
             store.bump_usage(stamp, KIND_FLAG, FLAG_SAMPLE)
@@ -139,7 +345,26 @@ def record_tool(store: Any, name: str, result: Any, day: Optional[str] = None) -
 
 
 def _empty_day(day: str) -> Dict[str, Any]:
-    return {"date": day, "requests": 0, "paths": {}, "tools": {}, "verdicts": {}, "flags": {}}
+    return {"date": day, "requests": 0, "paths": {}, "tools": {}, "verdicts": {}, "flags": {},
+            "zero_result_queries": _empty_zero_queries()}
+
+
+def _empty_zero_queries() -> Dict[str, Any]:
+    return {"total": 0, "distinct": 0, "top": []}
+
+
+def _top_zero_queries(buckets: Dict[tuple, int],
+                       limit: int = TOP_ZERO_QUERIES) -> Dict[str, Any]:
+    """`{(검색어, 트랙, 분야): 횟수}` → 빈도순 상위 `limit`건."""
+    labels = _tag_labels()
+    ordered = sorted(buckets.items(), key=lambda item: (-item[1], item[0][0]))[: max(1, limit)]
+    rows = [{"query": query,
+             "track": track,
+             "field": tag or None,
+             "field_label": labels.get(tag) if tag else None,
+             "count": count}
+            for (query, track, tag), count in ordered]
+    return {"total": sum(buckets.values()), "distinct": len(buckets), "top": rows}
 
 
 def stats_payload(store: Any, days: int = DEFAULT_DAYS,
@@ -152,6 +377,8 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
     start = _shift(end, -(window - 1))
     empty = [_empty_day(_shift(start, offset)) for offset in range(window)]
     by_day = {row["date"]: row for row in empty}
+    zero_by_day: Dict[str, Dict[tuple, int]] = {}
+    zero_all: Dict[tuple, int] = {}
 
     if store is not None:
         try:
@@ -163,8 +390,16 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
             if target is None:
                 continue
             kind = str(row.get("kind") or "")
-            key = safe_key(row.get("key"))
             count = int(row.get("count") or 0)
+            if kind == KIND_ZERO_QUERY:
+                entry = zero_entry(row.get("key"))
+                if entry is None:
+                    continue
+                bucket = zero_by_day.setdefault(str(row.get("day") or ""), {})
+                bucket[entry] = bucket.get(entry, 0) + count
+                zero_all[entry] = zero_all.get(entry, 0) + count
+                continue
+            key = safe_key(row.get("key"))
             if kind == KIND_PATH:
                 target["paths"][key] = count
                 target["requests"] += count
@@ -174,6 +409,9 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
                 target["verdicts"][key] = count
             elif kind == KIND_FLAG:
                 target["flags"][key] = count
+
+    for day, bucket in zero_by_day.items():
+        by_day[day]["zero_result_queries"] = _top_zero_queries(bucket)
 
     totals: Dict[str, Any] = {"requests": 0, "paths": {}, "tools": {}, "verdicts": {}, "flags": {}}
     for row in empty:
@@ -195,12 +433,27 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
             "stores_cookies": False,
             "stores_profile": False,
             "stores_identifiers": False,
-            "granularity": "date (YYYY-MM-DD, Asia/Seoul) · 경로 · 툴 · 판정 등급 · 0건/오류",
+            "stores_search_terms": "zero_result_only",
+            "zero_result_queries": {
+                "what_ko": "결과가 0건이었던 검색어만, 개인식별 요소를 지운 뒤 최대 30자로 남깁니다.",
+                "removed_ko": ["전화번호", "주민등록번호", "이메일", "URL", "@핸들",
+                               "2자리 이상 숫자(나이·연도)", "시·도·시·군·구 이름"],
+                "kept_ko": ["검색어(지운 뒤 남은 말)", "트랙(개인/창업)", "분야 태그"],
+                "results_are_not_stored": True,
+                "max_chars": MAX_QUERY_CHARS,
+                "top_per_day": TOP_ZERO_QUERIES,
+                "limit_ko": ("사람 이름·상호는 낱말만으로 판별할 수 없어 지우지 못합니다. "
+                             "입력란에는 제도·분야 낱말 예시를 안내합니다."),
+            },
+            "granularity": ("date (YYYY-MM-DD, Asia/Seoul) · 경로 · 툴 · 판정 등급 · 0건/오류 · "
+                            "0건 검색어(비식별, 최대 30자)"),
             "note_ko": (
                 "거주지·나이·소득구간·임신 여부 같은 입력값은 저장하지 않습니다. 알 수 없는 경로는 "
-                "/404 한 칸으로 합산하며, 재배포 시 카운터가 초기화될 수 있습니다."
+                "/404 한 칸으로 합산하며, 재배포 시 카운터가 초기화될 수 있습니다. 검색어는 결과가 "
+                "0건이었을 때만 지역명·연락처·숫자를 지운 형태로 남겨 다음 데이터 확충에 씁니다."
             ),
         },
         "days": empty,
+        "zero_result_queries": _top_zero_queries(zero_all),
         "totals": totals,
     }

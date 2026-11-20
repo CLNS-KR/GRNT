@@ -8,6 +8,7 @@
 | `--sources startup` | 15125364 K-Startup | 창업·기업 |
 | `--sources bizinfo` | 15157820 기업마당 | 창업·기업 |
 | `--sources all` | 셋 다 + 일자별 스냅샷 | 통합 |
+| `--local-portals` | 지자체 자체 복지포털(부평·인천·서울·경기·세종·브라보) | 통합 |
 
 `15113968` 활용신청이 승인되면 이 스크립트 한 번으로 `serviceList` 전량 +
 `supportConditions` 전량을 받아 `data/gov24/catalog.json` 을 만듭니다. `--sources all` 은
@@ -32,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -52,6 +54,8 @@ PROGRAM_CACHE = {"startup": "kstartup_programs", "bizinfo": "bizinfo_programs"}
 PROGRAM_SOURCE_VALUES = {"startup": "kstartup", "bizinfo": "bizinfo"}
 PROGRAM_LABELS = {SOURCE_ID: "정부24 보조금24", "startup": "창업진흥원 K-Startup",
                   "bizinfo": "중소벤처기업부 기업마당"}
+# 지자체 포털 항목의 서비스ID 접두어(BOKJION·ICBENEFIT·IC1IN·SEOULWIS·GG24·SEJONG·BROSO)
+_LOCAL_ID_PREFIX_RE = re.compile(r"^[A-Z0-9]+")
 
 
 def project_root() -> str:
@@ -379,15 +383,49 @@ def collect_programs(service_key: Optional[str] = None, *, data_dir: Optional[st
     return {"records": records, "stats": stats, "warnings": warnings}
 
 
+def _local_portal_prefix(service_id: Any) -> str:
+    """지자체 포털 행의 서비스ID 접두어("BOKJION-1792" → "BOKJION") — 어느 포털 항목인지 구분한다."""
+    match = _LOCAL_ID_PREFIX_RE.match(str(service_id or "").upper())
+    return match.group(0) if match else ""
+
+
+def _merge_local_rows(new_rows: List[Dict[str, Any]],
+                      existing_rows: List[Dict[str, Any]]) -> tuple:
+    """이번 수집에서 0건이 나온 포털은 **일시 실패**로 보고 기존 행을 유지한다.
+
+    포털 개편·차단·타임아웃은 흔합니다. 그때 그 포털 항목을 통째로 지우면 카탈로그가
+    조용히 줄어드므로, 한 건이라도 받은 포털만 새 것으로 교체합니다.
+    """
+    new_prefixes = {_local_portal_prefix(row.get("서비스ID")) for row in new_rows}
+    new_prefixes.discard("")
+    kept: List[Dict[str, Any]] = []
+    kept_prefixes = set()
+    for row in existing_rows:
+        prefix = _local_portal_prefix(row.get("서비스ID"))
+        if prefix and prefix not in new_prefixes:
+            kept.append(row)
+            kept_prefixes.add(prefix)
+    return list(new_rows) + kept, kept_prefixes
+
+
 def _existing_rows(root: str) -> List[Dict[str, Any]]:
-    target = os.path.join(root, CATALOG_FILE)
-    try:
-        with open(target, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return []
-    rows = payload.get("services") if isinstance(payload, dict) else None
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    """이미 있는 카탈로그(원본 우선, 없으면 압축본)의 원본 행 목록.
+
+    부분 실패 때 기존 데이터를 그대로 되쓰기 위한 것이므로 `.gz` 까지 본다
+    (CI 클론에는 압축본만 있고, 그것이 배포 데이터의 원본이다).
+    """
+    for name in (CATALOG_FILE, "catalog.json.gz"):
+        target = os.path.join(root, name)
+        if not os.path.exists(target):
+            continue
+        try:
+            payload = catalog_module.read_catalog_payload(target)
+        except (OSError, EOFError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        rows = payload.get("services") if isinstance(payload, dict) else None
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
 
 
 def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = None,
@@ -399,6 +437,7 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
              max_services: Optional[int] = None, max_pages: Optional[int] = None,
              grace_days: int = 30, include_expired: bool = False,
              max_records: Optional[int] = None, delay: float = 0.0,
+             include_local_portals: bool = False, broso_max_pages: int = 8,
              dry_run: bool = False,
              log: Callable[[str], None] = lambda message: None) -> Dict[str, Any]:
     """세 데이터셋을 하나의 카탈로그로 합치고 일자별 스냅샷을 남긴다."""
@@ -448,6 +487,42 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
                     stat["services"] = len(existing)
                     stat["state"] = f"{stat['state']}+기존유지"
 
+    local_counts: Dict[str, Any] = {}
+    if include_local_portals:
+        # 지자체 자체 복지포털(부평복지ON·인천·서울·경기24·세종·브라보)은 공공데이터 API 밖이라
+        # 별도 수집기가 필요하다. 실패하면 기존 지자체 행을 그대로 유지한다(부분 실패 허용).
+        from . import local_portals
+
+        try:
+            collected_local = local_portals.collect_all_local_portals(
+                include_expired=include_expired, broso_max_pages=broso_max_pages)
+        except Exception as exc:  # noqa: BLE001 - 포털 개편·차단은 흔한 실패다
+            collected_local = {"records": [], "counts": {}}
+            warnings.append(f"지자체 포털 수집 실패({type(exc).__name__}): 기존 항목을 유지합니다.")
+        local_rows = [row for row in collected_local.get("records") or []
+                      if isinstance(row, dict)]
+        existing_local = [row for row in _existing_rows(root)
+                          if str(row.get("source") or "") == "local_portal"]
+        merged_local, kept_prefixes = _merge_local_rows(local_rows, existing_local)
+        local_counts = dict(collected_local.get("counts") or {})
+        if kept_prefixes:
+            local_counts["kept_from_previous"] = sorted(kept_prefixes)
+            warnings.append(
+                "지자체 포털 " + ", ".join(sorted(kept_prefixes))
+                + " 에서 새 항목을 받지 못해 기존 행을 유지했습니다.")
+        if merged_local:
+            rows.extend(merged_local)
+            source_stats["local_portal"] = {
+                "label": "지자체 자체 복지포털",
+                "state": "network+기존유지" if kept_prefixes else "network",
+                "services": len(merged_local),
+                "counts": local_counts,
+            }
+        else:
+            source_stats["local_portal"] = {"label": "지자체 자체 복지포털",
+                                            "state": "empty", "services": 0}
+            warnings.append("지자체 포털에서 새 항목을 받지 못했고 기존 항목도 없습니다.")
+
     if not rows:
         return _failure("empty_result", "수집된 제도가 0건입니다. 인증키·승인 상태를 확인하세요.",
                         warnings=warnings, data_dir=root)
@@ -472,19 +547,23 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
                                      for source in sources if source in PROGRAM_LABELS),
             "name_ko": "개인·창업 통합 지원금 카탈로그",
             "source": ("공공데이터포털 오픈API — 정부24 보조금24(15113968) · "
-                       "K-Startup(15125364) · 기업마당(15157820)"),
+                       "K-Startup(15125364) · 기업마당(15157820)"
+                       + (" · 지자체 자체 복지포털" if include_local_portals else "")),
             "data_state": "live_sync",
             "catalog_state": "synced",
             "generated_on": now_iso(),
             "snapshot_day": day,
             "tracks": stats["by_track"],
             "sources": source_stats,
+            "local_portal_counts": local_counts,
             "stats": stats,
             "warnings": warnings,
             "note_ko": (
                 "개인(보조금24 JA 코드)과 창업·기업(K-Startup·기업마당 공고)을 한 카탈로그로 "
                 "합쳤습니다. 지난 공고는 동기화 때 제외하고, 비교용 스냅샷을 snapshots/ 에 "
                 "남깁니다. 기업마당 공고는 원문 문구를 그대로 보존합니다(변경금지 조건)."
+                + (" 지자체 자체 복지포털(부평·인천·서울·경기·세종·브라보) 항목도 함께 담았습니다."
+                   if include_local_portals else "")
             ),
         },
         "services": merged,
@@ -572,6 +651,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--max-programs", type=int, default=0,
                         help="창업·기업 공고 수집 건수 제한(시험용)")
     parser.add_argument("--delay", type=float, default=0.0, help="호출 간 대기(초)")
+    parser.add_argument("--local-portals", action="store_true",
+                        help="지자체 자체 복지포털도 함께 수집(부평·인천·서울·경기·세종·브라보)")
     parser.add_argument("--dry-run", action="store_true", help="파일을 쓰지 않고 결과만 확인")
     parser.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     args = parser.parse_args(argv)
@@ -621,6 +702,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             include_expired=args.include_expired,
             max_records=args.max_programs or None,
             delay=args.delay,
+            include_local_portals=args.local_portals,
             dry_run=args.dry_run,
             log=lambda message: print(f"· {message}", file=sys.stderr, flush=True),
         )

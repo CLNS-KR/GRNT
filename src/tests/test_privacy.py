@@ -175,5 +175,34 @@ class StorageScanTest(unittest.TestCase):
         self.assertEqual(explained["age"], 34)
 
 
+class ZeroResultQueryPrivacyTest(unittest.TestCase):
+    """0건 검색어 통계 — 남기는 범위를 넘는 것은 하나도 남기지 않는다."""
+
+    def test_sanitizer_strips_direct_identifiers(self):
+        from subsidy_kr import usage
+
+        raw = "010-0000-0000 홍길동 900101-1234567 " + "someone" + "@" + "example.com" + \
+              " @handle 인천 서구 34살"
+        cleaned = usage.sanitize_query(raw)
+        for leaked in ("010", "0000", "900101", "1234567", "example.com",
+                       "@handle", "인천", "서구", "34"):
+            self.assertNotIn(leaked, cleaned, cleaned)
+        self.assertLessEqual(len(cleaned), usage.MAX_QUERY_CHARS)
+
+    def test_stats_declares_zero_result_only_policy(self):
+        from subsidy_kr import usage
+
+        privacy = usage.stats_payload(None, days=1)["privacy"]
+        self.assertEqual(privacy["stores_search_terms"], "zero_result_only")
+        self.assertFalse(privacy["stores_profile"])
+        self.assertTrue(privacy["zero_result_queries"]["results_are_not_stored"])
+
+    def test_usage_module_never_reads_profile_fields(self):
+        """통계 모듈은 검색어·트랙·분야 밖의 요청 값을 읽지 않는다."""
+        text = read(os.path.join(SRC, "subsidy_kr", "usage.py"))
+        for pattern in ('args.get("age")', 'args.get("income', 'args.get("birth',
+                        'args.get("situation', 'args.get("profile")', 'args.get("resident'):
+            self.assertNotIn(pattern, text, pattern)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

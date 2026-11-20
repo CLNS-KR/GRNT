@@ -208,6 +208,23 @@ class HttpTest(unittest.TestCase):
         verdicts = json.loads(body)["totals"]["verdicts"]
         self.assertIn("eligible_likely", verdicts)
 
+    def test_zero_result_queries_are_anonymous(self):
+        # 결과가 0건인 검색만 남긴다 — 지역·전화번호는 지우고 검색어만
+        status, body = self._post("/v1/tools/search_subsidies", {
+            "profile": {"age": 34, "income_band": "JA0203",
+                        "region": {"sido": "인천광역시", "sigungu": "서구"}},
+            "keyword": "010-1234-5678 인천 서구 없는제도"})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["result"]["counts"]["eligible_likely"], 0)
+        _, raw, _ = self._get("/v1/stats?days=1")
+        stats = json.loads(raw)
+        self.assertIn("zero_result_queries", stats["days"][0])
+        self.assertEqual(stats["privacy"]["stores_search_terms"], "zero_result_only")
+        stored = " ".join(row["query"] for row in stats["zero_result_queries"]["top"])
+        for leaked in ("010", "1234", "인천", "서구", "JA0203"):
+            self.assertNotIn(leaked, stored)
+        self.assertIn("없는제도", stored)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
