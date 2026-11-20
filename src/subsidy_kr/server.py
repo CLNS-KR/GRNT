@@ -14,6 +14,9 @@
 `GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/guides/`·`/guides/{slug}` 질문형 가이드 ·
 `/healthz` · `/v1/meta` · `/v1/stats` ·
 `/v1/mcp`(매니페스트) · `/mcp`·`/v1/mcp`(POST JSON-RPC) · `/v1/tools/{tool}`(POST) ·
+`/v1/batch-match`(POST JSON·CSV — 거래처 일괄 익명 매칭) ·
+`/v1/batch-match/export.csv`·`/v1/batch-match/reports.html`(POST) ·
+`/v1/batch-match/sample.csv`(GET) ·
 `/v1/report/export.csv`·`/v1/report/print.html`(POST 본문 또는 GET 쿼리 — 거래처 전달용 리포트) ·
 `/robots.txt` · `/llms.txt` · `/sitemap.xml` · `/.well-known/mcp/server-card.json` ·
 `/{확인파일}.html`(환경변수로 등록한 경우)
@@ -34,18 +37,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import guides, mcp_http, pseo, site_verification, static_files, usage
-from .api import call_tool, mcp_manifest, report_export
+from . import batch_client, guides, mcp_http, pseo, site_verification, static_files, usage
+from .api import batch_export, call_tool, mcp_manifest, report_export
 from .catalog import Catalog, data_dir_from_env, load_catalog
 from .store import Store
 from .version import __version__
 from .web_ui import render_page
 
 MAX_BODY = 64 * 1024
+MAX_BATCH_BODY = 512 * 1024
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8787
 MCP_PATHS = ("/mcp", "/v1/mcp")
 REPORT_EXPORT_PATHS = ("/v1/report/export.csv", "/v1/report/print.html")
+BATCH_MATCH_PATH = "/v1/batch-match"
+BATCH_EXPORT_PATHS = ("/v1/batch-match/export.csv", "/v1/batch-match/reports.html")
+BATCH_SAMPLE_PATH = "/v1/batch-match/sample.csv"
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -188,6 +195,8 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                 self._head(200, "application/json; charset=utf-8")
             elif path in ("/robots.txt", "/llms.txt"):
                 self._head(200, "text/plain; charset=utf-8")
+            elif path == BATCH_SAMPLE_PATH:
+                self._head(200, "text/csv; charset=utf-8")
             elif path == "/sitemap.xml":
                 self._head(200, "application/xml; charset=utf-8")
             elif site_verification.file_body(path) is not None:
@@ -270,6 +279,17 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     query = urlparse(self.path).query
                     self._send_json(200, usage.stats_payload(store, _days_param(query)),
                                     cache="public, max-age=300")
+                elif path == BATCH_SAMPLE_PATH:
+                    body = batch_client.sample_csv().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Content-Disposition",
+                                     'attachment; filename="grnt-batch-sample.csv"')
+                    self.send_header("Cache-Control", "public, max-age=600")
+                    self._common_headers()
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif path in REPORT_EXPORT_PATHS:
                     self._handle_report_export(path, report_args_from_query(self.path))
                 elif site_verification.file_body(path) is not None:
@@ -290,6 +310,9 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             usage.record_request(store, "POST", path)
+            if path == BATCH_MATCH_PATH or path in BATCH_EXPORT_PATHS:
+                self._handle_batch(path)
+                return
             if path in REPORT_EXPORT_PATHS:
                 self._handle_report_export(path)
                 return
@@ -326,6 +349,78 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
             status = 200 if result.get("ok") is not False else (
                 404 if result.get("error") == "unknown_tool" else 400)
             self._send_json(status, result)
+
+        def _handle_batch(self, path: str) -> None:
+            """거래처 일괄 매칭 — JSON 본문·JSON 배열·CSV 텍스트를 모두 받는다.
+
+            본문이 `{` 또는 `[` 로 시작하지 않거나 Content-Type 이 text/csv 이면 CSV 로 읽습니다.
+            민감 열은 `batch_client` 가 값을 꺼내지 않고 버리며, 서버에는 아무것도 저장하지 않습니다.
+            """
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "invalid_content_length"})
+                return
+            if length > MAX_BATCH_BODY:
+                self._send_json(413, {"ok": False, "error": "payload_too_large",
+                                      "message": "batch_body_limit_512kb"})
+                return
+            raw = self.rfile.read(length) if length else b""
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                self._send_json(400, {"ok": False, "error": "invalid_encoding"})
+                return
+            content_type = str(self.headers.get("Content-Type") or "")
+            stripped = text.strip()
+            if not stripped:
+                self._send_json(400, {"ok": False, "error": "invalid_argument",
+                                      "message": "csv_or_clients_required"})
+                return
+            if "text/csv" in content_type or stripped[:1] not in ("{", "["):
+                args: Any = {"csv": text}
+            else:
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    self._send_json(400, {"ok": False, "error": "invalid_json"})
+                    return
+                if isinstance(payload, list):
+                    args = {"clients": payload}
+                elif isinstance(payload, dict):
+                    args = payload
+                else:
+                    self._send_json(400, {"ok": False, "error": "invalid_argument",
+                                          "message": "request_body_must_be_object_or_array"})
+                    return
+            if not isinstance(args, dict):
+                self._send_json(400, {"ok": False, "error": "invalid_argument"})
+                return
+            try:
+                if path == BATCH_MATCH_PATH:
+                    args = {**args, "include_report_html": True, "include_csv": True}
+                    result = call_tool("batch_match_clients", args, catalog,
+                                       client_id=self._client(), store=store)
+                    status = 200 if result.get("ok") is not False else 400
+                    self._send_json(status, result)
+                    return
+                fmt = "csv" if path.endswith(".csv") else "html"
+                export = batch_export(args, catalog, fmt)
+            except Exception:  # noqa: BLE001 - 내부 정보를 노출하지 않는다
+                self._send_json(500, {"ok": False, "error": "internal_error"})
+                return
+            body = export["body"].encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", export["content_type"])
+            self.send_header("Content-Length", str(len(body)))
+            disposition = "inline" if export.get("inline") else "attachment"
+            self.send_header("Content-Disposition",
+                             f'{disposition}; filename="{export["filename"]}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self._common_headers()
+            self.end_headers()
+            self.wfile.write(body)
 
         def _handle_report_export(self, path: str, args: Optional[Dict[str, Any]] = None) -> None:
             """거래처 전달용 CSV·인쇄용 HTML — 요청 본문은 `/v1/tools/business_report` 와 같다.

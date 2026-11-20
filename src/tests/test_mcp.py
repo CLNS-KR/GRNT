@@ -53,7 +53,7 @@ class McpProtocolTest(unittest.TestCase):
     def test_tools_list(self):
         out = self.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
         tools = out["result"]["tools"]
-        self.assertEqual(len(tools), 8)
+        self.assertEqual(len(tools), 9)
         self.assertEqual(tools[0]["name"], "search_subsidies")
         self.assertIn("inputSchema", tools[0])
 
@@ -125,7 +125,7 @@ class StdioTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0]["result"]["serverInfo"]["name"], "grnt")
-        self.assertEqual(len(lines[1]["result"]["tools"]), 8)
+        self.assertEqual(len(lines[1]["result"]["tools"]), 9)
         self.assertEqual(lines[2]["error"]["code"], -32700)
 
 

@@ -32,7 +32,9 @@ FLAG_SAMPLE = "sample_catalog"
 FIXED_PATHS = (
     "/", "/s/", "/guides/", "/guides", "/healthz", "/robots.txt", "/llms.txt", "/sitemap.xml",
     "/.well-known/mcp/server-card.json", "/v1/meta", "/v1/mcp", "/v1/stats",
-    "/v1/tools", "/mcp", "/favicon.ico", "/404",
+    "/v1/tools", "/v1/report/export.csv", "/v1/report/print.html",
+    "/v1/batch-match", "/v1/batch-match/export.csv", "/v1/batch-match/reports.html",
+    "/v1/batch-match/sample.csv", "/mcp", "/favicon.ico", "/404",
 )
 
 KEY_RE = re.compile(r"[^0-9A-Za-z._:/{}-]")

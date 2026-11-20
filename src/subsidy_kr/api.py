@@ -1,4 +1,4 @@
-"""MCP/JSON API 툴 7종.
+"""MCP/JSON API 툴 9종.
 
 | 툴 | 하는 일 |
 |---|---|
@@ -8,6 +8,7 @@
 | `list_region_subsidies` | 지역(시·도·시군구) 제도 목록(트랙 선택) |
 | `deadline_calendar` | 마감 임박 신청기한 캘린더(두 트랙 통합) |
 | `compare_ledgers` | 일자별 카탈로그 스냅샷 비교(추가·삭제·변경) |
+| `batch_match_clients` | 익명 거래처 CSV(50~300곳) → 거래처별 상위 3~5건 + 1페이지 요약 |
 | `get_service_meta` | 카탈로그 상태·판정 규격·개인정보 설정 |
 
 공통 원칙
@@ -21,8 +22,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from . import (agent_report, conditions, engine, guides, local_portals, models, programs, regions,
-               snapshots, usage)
+from . import (agent_report, batch_client, conditions, engine, guides, local_portals, models,
+               programs, regions, snapshots, usage)
 from .catalog import Catalog
 from .version import __version__
 
@@ -535,6 +536,45 @@ def tool_business_report(args: Dict[str, Any], catalog: Catalog, store: Any = No
     return _envelope("business_report", payload, catalog)
 
 
+def tool_batch_match_clients(args: Dict[str, Any], catalog: Catalog,
+                             store: Any = None) -> Dict[str, Any]:
+    """거래처 일괄(50~300곳) 익명 매칭 — 세무·노무 사무소용."""
+    payload: Dict[str, Any] = dict(batch_client.match_clients(catalog, args))
+    payload["summary_ko"] = batch_client.to_markdown(payload)
+    if args.get("include_report_html"):
+        payload["report_html"] = batch_client.to_report_html(payload)
+    if args.get("include_csv"):
+        payload["csv"] = batch_client.to_csv(payload)
+    payload["export"] = {
+        "method": "POST (같은 요청 본문)",
+        "csv_url": "/v1/batch-match/export.csv",
+        "report_url": "/v1/batch-match/reports.html",
+        "sample_csv_url": "/v1/batch-match/sample.csv",
+        "columns_csv": [label for label, _ in batch_client.CSV_COLUMNS],
+    }
+    payload["scope_limits_ko"] = SCOPE_LIMITS_KO + batch_client.SCOPE_LIMITS_KO
+    return _envelope("batch_match_clients", payload, catalog)
+
+
+def batch_export(arguments: Optional[Dict[str, Any]], catalog: Catalog,
+                 fmt: str = "csv") -> Dict[str, Any]:
+    """일괄 매칭 CSV·1페이지 요약 HTML — 웹 화면과 API 가 같은 계산을 쓴다."""
+    payload = batch_client.match_clients(catalog, arguments or {})
+    if fmt == "csv":
+        return {
+            "body": batch_client.to_csv(payload),
+            "content_type": "text/csv; charset=utf-8",
+            "filename": batch_client.filename_for(payload, "csv"),
+            "inline": False,
+        }
+    return {
+        "body": batch_client.to_report_html(payload),
+        "content_type": "text/html; charset=utf-8",
+        "filename": batch_client.filename_for(payload, "html"),
+        "inline": True,
+    }
+
+
 def report_export(arguments: Optional[Dict[str, Any]], catalog: Catalog,
                   fmt: str = "csv") -> Dict[str, Any]:
     """리포트 CSV·인쇄용 HTML — 웹 화면과 API 가 같은 계산을 쓴다."""
@@ -785,6 +825,45 @@ TOOL_DEFS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "batch_match_clients",
+        "title_ko": "거래처 일괄 매칭(익명 CSV)",
+        "description_ko": (
+            "세무·노무 사무소가 맡긴 **거래처 50~300곳**을 한 번에 매칭합니다. 익명 코드"
+            "(client_ref)·업종·상시근로자 수·연매출(금액 또는 구간)·업력·지역이 든 CSV(또는 같은 "
+            "모양의 JSON 배열)를 주면 거래처마다 지금 신청할 만한 공고 3~5건을 판정 등급·"
+            "혜택·마감 D-day와 함께 돌려주고, 거래처당 1페이지 요약 HTML(인쇄·PDF)과 CSV도 "
+            "만듭니다. **상호명·사업자번호·대표자·연락처·이메일·상세주소 열은 값을 읽지 않고 "
+            "버립니다**(열 이름만 응답에 남김). 매칭은 익명 코드와 조건 코드로만 합니다."
+        ),
+        "handler": tool_batch_match_clients,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "csv": {"type": "string",
+                        "description": ("거래처 CSV 텍스트. 열: client_ref(또는 코드·번호), industry, "
+                                        "employees, revenue_krw 또는 revenue_bracket, "
+                                        "business_age_years, region, note(선택). "
+                                        "상호·사업자번호 열이 있어도 버립니다.")},
+                "clients": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "CSV 대신 같은 조건을 JSON 객체 배열로 줄 때(민감 키는 무시).",
+                },
+                "top_n": {"type": "integer", "minimum": 3, "maximum": 5, "default": 5,
+                           "description": "거래처당 추천 건수(3~5)"},
+                "allow_labels": {"type": "boolean", "default": False,
+                                 "description": "note 열을 매칭에 쓰지 않는 표시용 라벨로 결과에 붙일지"},
+                "include_closed": {"type": "boolean", "default": False},
+                "keyword": {"type": "string", "description": "공고명 키워드로 좁히기"},
+                "include_report_html": {"type": "boolean", "default": False,
+                                        "description": "응답에 거래처별 1페이지 요약 HTML 포함"},
+                "include_csv": {"type": "boolean", "default": False,
+                                "description": "응답에 CSV 요약 포함"},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "get_service_meta",
         "title_ko": "서비스·데이터 상태",
         "description_ko": (
@@ -859,8 +938,8 @@ def text_summary(result: Dict[str, Any]) -> str:
         if data.get("without_date_count"):
             lines.append(f"날짜 미기재 {data['without_date_count']}건은 캘린더에서 제외했습니다.")
         return "\n".join(lines)
-    if "summary_ko" in data and ("sections" in data or "export" in data):
-        # business_report — 묶음별 요약이 이미 사람이 읽는 문장이다.
+    if "summary_ko" in data and ("sections" in data or "export" in data or "clients" in data):
+        # business_report·batch_match_clients — 이미 사람이 읽는 문장이다.
         return str(data.get("summary_ko") or "")
     if "summary_ko" in data and ("added" in data or "reason_ko" in data):
         return str(data.get("summary_ko") or data.get("reason_ko") or "")

@@ -11,7 +11,9 @@
 - `datagokr`     세 API 공통 전송·키 마스킹·응답 봉투 해석
 - `sync_gov24`   통합 동기화 CLI(+일자별 스냅샷)
 - `snapshots`    일자별 카탈로그 스냅샷·변경 비교
-- `api`          MCP/JSON 툴 7종
+- `api`          MCP/JSON 툴 9종
+- `agent_report`  사업자·대리인 리포트(거래처 1곳)
+- `batch_client`  거래처 일괄 익명 매칭(50~300곳)
 - `server`       웹 UI · JSON API · MCP(Streamable HTTP)
 - `mcp_stdio`    로컬 실행형 MCP(stdio)
 """

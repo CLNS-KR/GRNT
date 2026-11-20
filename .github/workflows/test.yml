@@ -40,16 +40,26 @@ jobs:
           status, _ = get("/healthz")
           assert status == 200
           status, body = get("/v1/mcp")
-          assert len(json.loads(body)["tools"]) == 8
+          assert len(json.loads(body)["tools"]) == 9
           request = urllib.request.Request(
               "http://127.0.0.1:8787/mcp",
               data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
               headers={"Content-Type": "application/json"}, method="POST")
           with urllib.request.urlopen(request, timeout=5) as response:
-              assert len(json.loads(response.read())["result"]["tools"]) == 8
+              assert len(json.loads(response.read())["result"]["tools"]) == 9
           status, body = get("/guides/")
           assert status == 200
           status, body = get("/guides/cheongnyeon-wolse")
           assert status == 200 and b"FAQPage" in body
+          status, body = get("/v1/batch-match/sample.csv")
+          assert status == 200 and b"client_ref" in body
+          request = urllib.request.Request(
+              "http://127.0.0.1:8787/v1/batch-match", data=body, method="POST",
+              headers={"Content-Type": "text/csv"})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              batch = json.loads(response.read())
+          assert batch["ok"] and batch["result"]["summary"]["clients"] == 5
+          assert "client-page" in batch["result"]["report_html"]
+          assert batch["result"]["anonymity"]["identity_used_in_matching"] is False
           print("smoke ok")
           PY

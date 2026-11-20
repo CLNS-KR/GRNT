@@ -114,6 +114,9 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
 - [지역 목록]({root}/v1/tools/list_region_subsidies): POST. `{{"sido": "인천광역시", "sigungu": "서구", "track": "business"}}`
 - [마감 임박 캘린더]({root}/v1/tools/deadline_calendar): POST. `{{"days": 30, "track": "all"}}`
 - [카탈로그 변화 비교]({root}/v1/tools/compare_ledgers): POST. `{{"from_date": "2026-11-18", "to_date": "2026-11-19"}}`
+- [거래처 일괄 매칭]({root}/v1/batch-match): POST(JSON 또는 `text/csv`). 세무·노무 사무소용 —
+  `{{"csv": "client_ref,industry,employees,revenue_bracket,business_age_years,region\\nC-001,음식숙박,3,1억~2억,4,인천광역시 서구"}}`
+  거래처 50~300곳 → 거래처별 3~5건 + 1페이지 요약 HTML. 샘플 CSV는 [{root}/v1/batch-match/sample.csv]({root}/v1/batch-match/sample.csv).
 
 ## 읽는 법
 - 판정 등급: `eligible_likely`(받을 가능성 높음) / `check_needed`(조건 확인 필요) /
@@ -128,6 +131,8 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
   창업진흥원 K-Startup(15125364, 이용허락범위 제한 없음) ·
   중소벤처기업부 기업마당(15157820, 출처표시·변경금지 — 원문 문구를 그대로 보존하며 출처를 표시합니다).
 - 이 서비스는 신청 대행·법률 자문을 하지 않으며, 최종 수급·선정 여부는 소관기관 심사로 결정됩니다.
+- 거래처 일괄 매칭(`POST /v1/batch-match`)은 상호·사업자번호·대표자·연락처·이메일·상세주소 열의
+  **값을 읽지 않고 버립니다**(열 이름만 응답에 남김). 매칭은 익명 코드와 조건 코드로만 합니다.
 
 {guides_section}"""
 

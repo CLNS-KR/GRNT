@@ -1,5 +1,5 @@
 """버전·브랜드 한 곳."""
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 SERVICE_NAME = "GRNT"
 SERVICE_TITLE_KO = "개인·창업 통합 지원금 판정기"
 SERVICE_TAGLINE = "Grants, simplified."

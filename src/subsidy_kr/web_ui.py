@@ -164,6 +164,16 @@ details p{margin:6px 0 0}
 .report-sum span{font-size:12.5px;font-weight:700;padding:5px 11px;border-radius:999px;
   background:var(--bg);border:1px solid var(--line);color:var(--ink-soft)}
 .report-size{margin:12px 0 0;padding:11px 13px;border-radius:11px;background:var(--info-soft);color:var(--info);font-size:13px}
+textarea{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+  line-height:1.6;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;
+  padding:11px 12px;resize:vertical;min-height:150px}
+textarea:focus{outline:2px solid var(--brand);outline-offset:1px;border-color:transparent}
+.anon{margin:10px 0 0;padding:10px 13px;border-radius:10px;background:var(--ok-soft);color:var(--ok);
+  font-size:12.5px;line-height:1.6}
+.batch-client{margin-top:8px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;
+  background:var(--bg);font-size:13px}
+.batch-client summary{cursor:pointer;font-weight:700;color:var(--ink)}
+.batch-client p{margin:5px 0 0;font-size:12.5px;color:var(--ink-soft)}
 .report-size ul{margin:6px 0 0;padding-left:18px}
 .report-size li{margin:2px 0}
 .guide-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 20px;
@@ -309,7 +319,7 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         count=count,
         generated=generated,
         guides_footer=guides.footer_html(),
-        extra_script=ENTRY_SCRIPT,
+        extra_script=ENTRY_SCRIPT + BATCH_SCRIPT,
         verification=site_verification.meta_tags(),
     )
 
@@ -338,6 +348,161 @@ ENTRY_SCRIPT = """
       }
     }
   }catch(error){}
+})();
+"""
+
+BATCH_SCRIPT = """
+(function(){
+  var box = document.getElementById('batch-csv');
+  if (!box) { return; }
+  var runBtn = document.getElementById('batch-run');
+  var statusEl = document.getElementById('batch-status');
+  var sumEl = document.getElementById('batch-summary');
+  var noteEl = document.getElementById('batch-note');
+  var actionsEl = document.getElementById('batch-actions');
+  var previewEl = document.getElementById('batch-preview');
+  var last = null;
+
+  function mk(tag, cls, text){
+    var node = document.createElement(tag);
+    if (cls) { node.className = cls; }
+    if (text !== undefined) { node.textContent = text; }
+    return node;
+  }
+
+  function download(name, text, type){
+    var blob = new Blob([text], {type: type || 'text/plain;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var anchor = document.createElement('a');
+    anchor.href = url; anchor.download = name;
+    document.body.appendChild(anchor); anchor.click(); document.body.removeChild(anchor);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function openReport(hash){
+    if (!last || !last.report_html) { return; }
+    var url = URL.createObjectURL(new Blob([last.report_html], {type: 'text/html'}));
+    window.open(url + (hash || ''), '_blank', 'noopener');
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  }
+
+  function renderBatch(result){
+    last = result;
+    sumEl.innerHTML = ''; previewEl.innerHTML = ''; actionsEl.innerHTML = '';
+    var summary = result.summary || {};
+    [['거래처', (summary.clients || 0) + '곳'],
+     ['추천 공고', (summary.matches || 0) + '건'],
+     ['7일 내 마감 포함', (summary.clients_with_urgent || 0) + '곳'],
+     ['후보 없음', (summary.no_match || 0) + '곳'],
+     ['처리', (summary.elapsed_ms || 0) + 'ms']].forEach(function(pair){
+      sumEl.appendChild(mk('span', null, pair[0] + ' ' + pair[1]));
+    });
+
+    var anonymity = result.anonymity || {};
+    var dropped = anonymity.identity_columns_dropped || [];
+    noteEl.hidden = false;
+    noteEl.textContent = (anonymity.note_ko || '')
+      + (dropped.length ? ' 버린 열: ' + dropped.join(', ') + '.' : '');
+
+    var actions = [
+      ['1페이지 요약 열기(인쇄·PDF)', function(){ openReport('#print'); }, 'a'],
+      ['요약 HTML 다운로드', function(){
+         if (last && last.report_html) { download('batch-client-reports.html', last.report_html, 'text/html;charset=utf-8'); }
+       }, 'button'],
+      ['CSV 다운로드', function(){
+         if (last && last.csv) { download('grnt-batch-summary.csv', last.csv, 'text/csv;charset=utf-8'); }
+       }, 'button']
+    ];
+    actions.forEach(function(spec){
+      var node = mk(spec[2], null, spec[0]);
+      if (spec[2] === 'a') { node.href = '#'; }
+      node.addEventListener('click', function(event){
+        if (spec[2] === 'a') { event.preventDefault(); }
+        spec[1]();
+      });
+      actionsEl.appendChild(node);
+    });
+    actionsEl.hidden = false;
+
+    var clients = result.clients || [];
+    clients.slice(0, 20).forEach(function(client){
+      var conditions = client.conditions || {};
+      var region = (conditions.region || {}).label || '전국';
+      var employees = (conditions.employees === null || conditions.employees === undefined)
+        ? '미입력' : conditions.employees + '명';
+      var details = mk('details', 'batch-client');
+      details.appendChild(mk('summary', null,
+        client.client_ref + ' · ' + (conditions.industry_label || '업종 미지정')
+        + ' · 상시 ' + employees + ' · ' + region
+        + ' · ' + (client.matches || []).length + '건'
+        + (client.label ? ' · ' + client.label : '')));
+      (client.matches || []).forEach(function(match){
+        details.appendChild(mk('p', null,
+          (match.d_day || '') + ' [' + (match.category_label || '') + '] ' + (match.name || '')
+          + ' — ' + ((match.verdict || {}).label_ko || '')));
+      });
+      (client.notes_ko || []).forEach(function(note){
+        details.appendChild(mk('p', null, '확인: ' + note));
+      });
+      previewEl.appendChild(details);
+    });
+    if (clients.length > 20) {
+      previewEl.appendChild(mk('p', 'hint',
+        '미리보기는 20곳까지입니다. 전체 요약은 위의 1페이지 요약·CSV로 받으세요.'));
+    }
+    if (!clients.length) {
+      previewEl.appendChild(mk('p', 'hint', '거래처가 없습니다. CSV를 확인해 주세요.'));
+    }
+  }
+
+  document.getElementById('batch-sample').addEventListener('click', function(){
+    fetch('/v1/batch-match/sample.csv').then(function(response){ return response.text(); })
+      .then(function(text){
+        box.value = text.trim();
+        statusEl.textContent = '샘플 5곳을 채웠습니다. 상호·사업자번호 열이 있어도 버려집니다.';
+      }).catch(function(){
+        statusEl.textContent = '샘플을 불러오지 못했습니다. 직접 붙여 넣어 주세요.';
+      });
+  });
+
+  document.getElementById('batch-download-sample').addEventListener('click', function(){
+    var anchor = document.createElement('a');
+    anchor.href = '/v1/batch-match/sample.csv';
+    anchor.download = 'grnt-batch-sample.csv';
+    document.body.appendChild(anchor); anchor.click(); document.body.removeChild(anchor);
+  });
+
+  runBtn.addEventListener('click', function(){
+    var csv = box.value.trim();
+    if (!csv) {
+      statusEl.textContent = 'CSV를 붙여 넣거나 샘플 CSV를 채워 주세요.';
+      return;
+    }
+    runBtn.disabled = true;
+    statusEl.textContent = '거래처를 매칭하는 중…';
+    var payload = {
+      csv: csv,
+      top_n: document.getElementById('batch-top5').checked ? 5 : 3,
+      allow_labels: document.getElementById('batch-labels').checked
+    };
+    fetch('/v1/batch-match', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function(response){
+      return response.json().then(function(body){ return {ok: response.ok, body: body}; });
+    }).then(function(out){
+      if (!out.body.ok) { throw new Error(out.body.message || out.body.error || 'error'); }
+      statusEl.textContent = '';
+      renderBatch(out.body.result || out.body);
+      document.getElementById('batch-card').scrollIntoView({behavior:'smooth', block:'start'});
+    }).catch(function(error){
+      statusEl.textContent = '매칭하지 못했습니다(' + error.message
+        + '). CSV 열 이름·거래처 수(최대 300곳)를 확인해 주세요.';
+    }).finally(function(){
+      runBtn.disabled = false;
+    });
+  });
 })();
 """
 
@@ -566,6 +731,42 @@ PAGE_TEMPLATE = """<!doctype html>
       <p class="foot" id="report-foot"></p>
     </section>
 
+    <section class="card" id="batch-card">
+      <h2>세무·노무사용 거래처 일괄 매칭 <span class="tag">익명 CSV</span></h2>
+      <p class="sub">거래처 50~300곳을 한 번에 올리면 거래처마다 지금 신청할 만한 공고 3~5건을 골라
+      <strong>1페이지 요약(인쇄·PDF)</strong>과 <strong>CSV</strong>로 정리합니다. 한 곳씩 돌리는
+      &lsquo;사업자·대리인 리포트&rsquo;와 같은 판정 규격(같은 엔진·같은 묶음·같은 우선순위)을 씁니다.</p>
+      <p class="anon"><strong>상호명·사업자번호는 서버 매칭에 쓰지 않고 조건 코드만 처리합니다.</strong><br>
+      상호·사업자번호·대표자·연락처·이메일·상세주소 열은 <strong>값을 읽지 않고 버립니다</strong>
+      (열 이름만 응답에 남김). 결과는 익명 코드 <code>client_ref</code> 기준이라, 원본 파일에서
+      VLOOKUP 으로 다시 붙이면 됩니다.</p>
+      <label class="field" style="margin-top:14px">
+        <span class="lab">거래처 CSV</span>
+        <textarea id="batch-csv" rows="8" spellcheck="false"
+          placeholder="client_ref,industry,employees,revenue_bracket,business_age_years,region&#10;C-001,음식숙박,3,1억~2억,4,인천광역시 서구"></textarea>
+        <span class="hint">열 이름은 한글도 됩니다(거래처코드·업종·직원수·연매출·업력·지역·비고).
+        매출은 <code>revenue_krw</code>(원) 또는 <code>revenue_bracket</code>(구간) 중 하나로 주세요.</span>
+      </label>
+      <div class="actions" style="margin-top:12px">
+        <button class="ghost" type="button" id="batch-sample">샘플 CSV 채우기</button>
+        <button class="ghost" type="button" id="batch-download-sample">샘플 CSV 다운로드</button>
+        <button class="primary" type="button" id="batch-run">거래처 일괄 매칭</button>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--ink-soft)">
+        <label style="display:inline-flex;gap:6px;align-items:center">
+          <input type="checkbox" id="batch-labels"> note 열을 표시용 라벨로 함께 보기(매칭 미사용)
+        </label>
+        <label style="display:inline-flex;gap:6px;align-items:center">
+          <input type="checkbox" id="batch-top5" checked> 거래처당 5건(해제 시 3건)
+        </label>
+      </div>
+      <div class="status" id="batch-status" role="status" aria-live="polite"></div>
+      <div class="report-sum" id="batch-summary"></div>
+      <p class="hint" id="batch-note" hidden></p>
+      <div class="report-actions" id="batch-actions" hidden></div>
+      <div id="batch-preview"></div>
+    </section>
+
     <section class="card" id="results-card" hidden>
       <h2>판정 결과</h2>
       <p class="sub" id="results-sub"></p>
@@ -581,6 +782,7 @@ PAGE_TEMPLATE = """<!doctype html>
       <strong>창업·소상공인·기업</strong>은 <strong>K-Startup</strong>·<strong>기업마당</strong> 공고의
       구조화된 신청자격(업력·연령·지역·대상·성별)을 대조합니다. AI가 문장을 읽고 추측하지 않습니다.</p>
       <div class="links">
+        <a href="#batch-card">거래처 일괄 매칭(익명 CSV)</a>
         <a href="/s/">주제별 지원금 모아보기</a>
         <a href="/guides/">자주 묻는 지원금 질문</a>
         <a href="/v1/meta">서비스·데이터 상태</a>

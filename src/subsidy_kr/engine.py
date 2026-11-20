@@ -790,6 +790,28 @@ def _criteria_rules(service: Service) -> Tuple[Dict[str, Any], ...]:
 # ---------------------------------------------------------------------------
 # 판정
 # ---------------------------------------------------------------------------
+def structural_fail(service: Service, profile: Dict[str, Any]) -> Optional[str]:
+    """구조화 요건만 보고 **명확히 어긋난** 항목의 묶음 이름을 돌려준다(없으면 None).
+
+    `evaluate_service` 가 쓰는 검사 함수를 그대로 부르므로, 여기서 걸러진 제도는 정밀
+    판정에서도 `ineligible` 이 됩니다. 그래서 거래처 일괄 매칭처럼 수백 프로필 × 수천 공고를
+    훑을 때 **결과를 바꾸지 않는** 1차 필터로 쓸 수 있습니다(판정을 새로 만들지 않습니다).
+    """
+    checks: List[Optional[Dict[str, Any]]] = [_check_region(service, profile)]
+    if service.is_business:
+        checks.extend((
+            _check_business_entity(service, profile),
+            _check_business_years(service, profile),
+            _check_business_age(service, profile),
+            _check_business_gender(service, profile),
+            _check_business_industry(service, profile),
+        ))
+    for rule in checks:
+        if rule and rule.get("state") == FAIL:
+            return str(rule.get("group") or "criteria")
+    return None
+
+
 def evaluate_service(service: Service, profile: Dict[str, Any],
                      today: Optional[date] = None) -> Dict[str, Any]:
     rules: List[Dict[str, Any]] = []

@@ -10,8 +10,9 @@
 > 로그인 없음, 주민등록번호 없음, 서버 저장 없음.
 
 - 웹 UI: `GET /` — 개인·가구 ↔ 창업·소상공인·기업 ↔ **사업자·대리인 리포트** 3탭, 30초 조건 선택
-- JSON API: `POST /v1/tools/{tool}` — 툴 8종
-- 거래처 전달용: `POST`(또는 `GET`) `/v1/report/export.csv` · `/v1/report/print.html` — 세무사·노무사용 요약 표
+- JSON API: `POST /v1/tools/{tool}` — 툴 9종
+- 거래처 전달용: `POST`(또는 `GET`) `/v1/report/export.csv` · `/v1/report/print.html` — 세무사·노무사용 요약 표(1곳)
+- 거래처 일괄(익명): `POST /v1/batch-match` — 세무·노무사무소 거래처 50~300곳 CSV → 거래처별 3~5건 + 1페이지 요약 HTML·CSV
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
 - 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 36개(FAQPage JSON-LD)
@@ -109,7 +110,7 @@ PYTHONPATH=src python -m subsidy_kr.sync_gov24 --sources all
 
 ---
 
-## 3. 툴 8종
+## 3. 툴 9종
 
 | 툴 | 입력 | 출력 요점 |
 |---|---|---|
@@ -120,6 +121,7 @@ PYTHONPATH=src python -m subsidy_kr.sync_gov24 --sources all
 | `deadline_calendar` | `days`(기본 30), `track`, `sido`/`sigungu`, `keyword` | 마감 임박 캘린더(날짜별) + 날짜 미기재 건수 |
 | `compare_ledgers` | `from_date`, `to_date`, `service_id` | 일자별 스냅샷 비교: 추가·삭제·기간/금액/대상/모집상태 변경 |
 | `business_report` | `industry`, `employees`, `annual_revenue_krw`(또는 `annual_revenue_eok`), `biz_years`, `sido`/`sigungu`, `interest[]` | 세무사·노무사용 **거래처 리포트** — 소상공인/중소기업/고용·노무/정책자금·세제 네 묶음 + 우선순위 + D-7 |
+| `batch_match_clients` | `csv`(또는 `clients[]`), `top_n`(3~5), `allow_labels` | 거래처 50~300곳 **일괄 익명 매칭** — 거래처별 상위 3~5건 + 1페이지 요약 |
 | `get_service_meta` | — | 카탈로그·두 트랙·판정 등급·자격 코드·기업 조건·스냅샷·개인정보 설정 |
 
 ```bash
@@ -155,6 +157,15 @@ curl -s localhost:8787/v1/tools/business_report -H 'Content-Type: application/js
 curl -s -X POST localhost:8787/v1/report/export.csv -H 'Content-Type: application/json' \
   -d '{"sido":"인천광역시","sigungu":"서해구","industry":"음식숙박","employees":3,"annual_revenue_eok":2}' -o report.csv
 open "http://localhost:8787/v1/report/print.html?industry=food&employees=3&annual_revenue_eok=2"
+```
+
+```bash
+# 거래처 일괄(익명) — CSV 300곳까지, 상호·사업자번호 열은 값을 읽지 않는다
+curl -s localhost:8787/v1/batch-match -H 'Content-Type: text/csv' --data-binary @clients.csv
+curl -s localhost:8787/v1/batch-match/sample.csv -o grnt-batch-sample.csv
+# 같은 본문으로 1페이지 요약(인쇄·PDF)·CSV 요약을 받는다
+curl -s -X POST localhost:8787/v1/batch-match/reports.html -H 'Content-Type: text/csv' \
+  --data-binary @clients.csv -o batch-reports.html
 ```
 
 ```bash
@@ -201,7 +212,41 @@ curl -s localhost:8787/mcp -H 'Content-Type: application/json' -d '{
 
 ---
 
-## 3-2. 질문형 가이드 `/guides/` (AI 인용·검색 유입)
+## 3-2. 거래처 일괄 익명 매칭 (50~300곳)
+
+세무·노무 사무소는 거래처를 수십~수백 곳 맡깁니다. 한 곳씩 리포트를 돌리는 대신, 거래처
+목록 CSV 하나로 **거래처마다 지금 신청할 만한 공고 3~5건**을 뽑아 1페이지 요약(인쇄·PDF)과
+CSV로 정리합니다. `POST /v1/batch-match`, `batch_match_clients` 툴, 웹 UI 의
+&ldquo;거래처 일괄 매칭(익명 CSV)&rdquo; 카드가 모두 같은 계산을 씁니다.
+
+| 입력 열 | 내용 |
+|---|---|
+| `client_ref` | 익명 코드(`C-001`). 없으면 순서대로 붙입니다 |
+| `industry` | 업종 — 한글·코드 모두(`음식숙박`, `food`, `IT·정보통신`) |
+| `employees` | 상시근로자 수(대표자 제외, 월 60시간 미만 제외) |
+| `revenue_krw` 또는 `revenue_bracket` | 연매출(원) 또는 구간(`1억~3억`, `5천만원 미만`) |
+| `business_age_years` | 업력(년) |
+| `region` | `시도 시군구`(`인천광역시 서구`) |
+| `note` | 표시용 라벨 — 기본으로 버립니다(`allow_labels=true` 일 때만, 매칭엔 안 씀) |
+
+- **익명 경계** — `company_name`·`biz_no`·대표자·연락처·이메일·주민등록번호·상세주소 열은
+  헤더만 확인하고 **값을 꺼내지 않습니다**. 매칭 함수에 들어가는 것은 익명 코드와 조건 코드
+  (업종 슬러그·근로자 수·매출·업력·시도/시군구)뿐이고, 응답에는 **버린 열 이름만** 남깁니다.
+  라벨을 붙이지 않으면 `client_ref` 로 사무소 원본 파일에서 VLOOKUP 하면 됩니다.
+- **2단 매칭** — ①`engine.structural_fail` 로 구조화 요건에서 명확히 어긋난 공고만 걷어내고
+  (정밀 판정에서도 `ineligible` 이라 결과가 달라지지 않음), ②남은 후보를 우선순위 근사 점수로
+  24건까지 줄여 `engine.evaluate_service` 로 정밀 판정합니다. 거래처 300곳 × 전국 사업 공고
+  1.5천 건을 **1초 안**에 끝냅니다(응답의 `summary.elapsed_ms`).
+- **거래처별 1페이지** — `to_report_html` 이 A4 `page-break` 로 거래처마다 한 장을 만들고,
+  장마다 `요약 복사`·`이 장만 인쇄`·`이 장 HTML 저장` 버튼이 붙습니다
+  (`POST /v1/batch-match/reports.html` → `batch-client-reports.html`).
+  CSV 요약은 `/v1/batch-match/export.csv`(BOM·수식 주입 방지).
+- **한계** — 거래처당 상위 24건만 정밀 판정합니다. 규모 판정은 추정이고, 선정은 평가·경쟁으로
+  결정됩니다. 응답의 `scope_limits_ko` 에 같은 문구를 넣습니다.
+
+---
+
+## 3-3. 질문형 가이드 `/guides/` (AI 인용·검색 유입)
 
 사람들은 ChatGPT·Perplexity·네이버에 "청년 월세 지원 조건"처럼 **질문**으로 묻습니다. 그때
 인용되려면 질문 하나에 답 하나가 있는 페이지와, 기계가 읽을 구조화 데이터가 함께 있어야 합니다.
@@ -288,8 +333,9 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── store.py           SQLite(스냅샷·익명 카운터)
     │   ├── deadlines.py       신청기한 자유 텍스트 파서
     │   ├── regions.py         시도·시군구 정규화, 소관기관명→지역
-    │   ├── api.py             툴 8종 정의
+    │   ├── api.py             툴 9종 정의
     │   ├── agent_report.py    사업자·대리인 리포트(규모 판단·분류·CSV/인쇄)
+    │   ├── batch_client.py    거래처 일괄 익명 매칭(CSV 경계·1페이지 요약·CSV)
     │   ├── mcp_http.py        JSON-RPC 2.0
     │   ├── mcp_stdio.py       stdio 전송
     │   ├── server.py          HTTP 라우팅
@@ -299,7 +345,7 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── static_files.py    robots·llms·sitemap·server-card
     │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
     │   └── usage.py           익명 일별 카운터
-    └── tests/                 unittest 27개 파일 · 403건
+    └── tests/                 unittest 28개 파일 · 458건
 ```
 
 ### 5-1. 응답 시간과 캐시
@@ -394,7 +440,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.3.0` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.0` 태그로 게시합니다.
 
 ## 9. 라이선스
 
