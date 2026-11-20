@@ -910,6 +910,7 @@ PAGE_TEMPLATE = """<!doctype html>
     card.hidden = false;
 
     var allRows = result.results || [];
+    var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
     // 이전 동적 필터 바 정리
     document.querySelectorAll('.sub-bar-dyn').forEach(function(elNode){{ elNode.remove(); }});
 
@@ -1001,7 +1002,6 @@ PAGE_TEMPLATE = """<!doctype html>
       }}
 
       if (activeFilter !== 'none') {{
-        var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
         var fieldCounts = {{}};
         verdictRows.forEach(function(r){{
           var b = fieldBucket(r);
