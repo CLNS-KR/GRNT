@@ -1413,6 +1413,13 @@ PAGE_TEMPLATE = """<!doctype html>
       trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다' + hiddenNote + '. ' +
       '위 탭을 눌러 판정별로 골라 볼 수 있습니다.';
 
+    if (result.keyword_note_ko) {{
+      var kwNotice = el('div', 'notice');
+      kwNotice.style.margin = '0 0 12px';
+      kwNotice.textContent = result.keyword_note_ko;
+      box.appendChild(kwNotice);
+    }}
+
     var portalStatus = result.local_portal_status || null;
     if (portalStatus && portalStatus.supported === false && portalStatus.notice_ko) {{
       var notice = el('div', 'notice');
