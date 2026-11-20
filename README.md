@@ -14,6 +14,7 @@
 - 거래처 전달용: `POST`(또는 `GET`) `/v1/report/export.csv` · `/v1/report/print.html` — 세무사·노무사용 요약 표
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
+- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 36개(FAQPage JSON-LD)
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
   동기화 없이 바로 12,429건 실데이터로 뜹니다. 내장 샘플(개인 20 + 창업·기업 12)은 둘 다 없을 때의 오프라인 대체입니다.
@@ -200,6 +201,29 @@ curl -s localhost:8787/mcp -H 'Content-Type: application/json' -d '{
 
 ---
 
+## 3-2. 질문형 가이드 `/guides/` (AI 인용·검색 유입)
+
+사람들은 ChatGPT·Perplexity·네이버에 "청년 월세 지원 조건"처럼 **질문**으로 묻습니다. 그때
+인용되려면 질문 하나에 답 하나가 있는 페이지와, 기계가 읽을 구조화 데이터가 함께 있어야 합니다.
+`/guides/` 아래 36개 페이지가 그 역할을 합니다.
+
+| 구성 | 내용 |
+|---|---|
+| 한 줄 기준 | 그 질문에 대한 짧은 답. 금액·수치는 해마다 바뀌므로 고정하지 않고 공고문 확인으로 남깁니다 |
+| 확인해야 할 조건 | 나이·소득·재산·서류 등 4~6개 체크포인트 |
+| 지금 열려 있는 관련 공고 | 카탈로그 검색 결과에서 **마감되지 않은 것만** 최대 5건, 없으면 0건이라고 씁니다 |
+| 흔히 하는 착각 | "나이만 맞으면 다 받는다" 같은 실제 오해 |
+| AI·에이전트용 | `/mcp` 주소와 `/v1/tools/search_subsidies` 호출 예시(같은 조건) |
+| 구조화 데이터 | `FAQPage`(질문 4개씩) + `BreadcrumbList` JSON-LD |
+
+- 가이드의 **"내 조건으로 확인하기"** 는 `/?q=질문키워드&track=…` 로 판정 화면을 미리 채워
+  바로 조회까지 실행합니다(브라우저 저장소를 쓰지 않고 주소만 읽습니다).
+- 홈 화면 푸터에 가이드 링크를 자동으로 노출하고, `/sitemap.xml`(우선순위 0.6~0.7)과
+  `/llms.txt`(질문 + 한 줄 기준)에 함께 싣습니다.
+- 익명 카운터에는 `/guides/{slug}` 버킷이 따로 남아 **어떤 질문이 유입을 만드는지** 셉니다.
+
+---
+
 ## 4. 일자별 스냅샷(변경 이력)
 
 지원사업 공고는 기간·예산·자격이 조용히 바뀝니다. 그래서 동기화할 때마다
@@ -271,10 +295,11 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── server.py          HTTP 라우팅
     │   ├── web_ui.py          인라인 CSS/JS 단일 페이지(3탭)
     │   ├── pseo.py            /s/ 주제·지역 페이지(thin content 규칙)
+    │   ├── guides.py          /guides/ 질문형 가이드 36개(FAQPage·실시간 공고 연결)
     │   ├── static_files.py    robots·llms·sitemap·server-card
     │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
     │   └── usage.py           익명 일별 카운터
-    └── tests/                 unittest 24개 파일 · 371건
+    └── tests/                 unittest 27개 파일 · 403건
 ```
 
 ### 5-1. 응답 시간과 캐시

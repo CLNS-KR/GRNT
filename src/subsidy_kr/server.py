@@ -11,7 +11,8 @@
 
 경로
 ----
-`GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/healthz` · `/v1/meta` · `/v1/stats` ·
+`GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/guides/`·`/guides/{slug}` 질문형 가이드 ·
+`/healthz` · `/v1/meta` · `/v1/stats` ·
 `/v1/mcp`(매니페스트) · `/mcp`·`/v1/mcp`(POST JSON-RPC) · `/v1/tools/{tool}`(POST) ·
 `/v1/report/export.csv`·`/v1/report/print.html`(POST 본문 또는 GET 쿼리 — 거래처 전달용 리포트) ·
 `/robots.txt` · `/llms.txt` · `/sitemap.xml` · `/.well-known/mcp/server-card.json` ·
@@ -33,10 +34,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import mcp_http, pseo, site_verification, static_files, usage
+from . import guides, mcp_http, pseo, site_verification, static_files, usage
 from .api import call_tool, mcp_manifest, report_export
 from .catalog import Catalog, data_dir_from_env, load_catalog
 from .store import Store
+from .version import __version__
 from .web_ui import render_page
 
 MAX_BODY = 64 * 1024
@@ -120,7 +122,7 @@ def report_args_from_query(path: str) -> Dict[str, Any]:
 
 def make_handler(catalog: Catalog, store: Optional[Store] = None):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "grnt/0.2"
+        server_version = f"grnt/{__version__}"
         sys_version = ""
 
         def version_string(self) -> str:
@@ -176,7 +178,8 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
         # --- 라우팅 ----------------------------------------------------------
         def do_HEAD(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
-            if path in ("/", "/index.html", "/s", "/s/") or path.startswith("/s/"):
+            if (path in ("/", "/index.html", "/s", "/s/", "/guides", "/guides/")
+                    or path.startswith("/s/") or path.startswith("/guides/")):
                 self._head(200, "text/html; charset=utf-8")
             elif path == "/healthz":
                 self._head(200, "application/json; charset=utf-8")
@@ -223,6 +226,17 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     if page is None:
                         self._send_json(404, {"ok": False, "error": "not_found",
                                               "message": "unknown_page"})
+                    else:
+                        self._send_html(200, page, cache="public, max-age=600")
+                elif path in ("/guides", "/guides/"):
+                    self._send_html(200, guides.render_index(catalog),
+                                    cache="public, max-age=600")
+                elif path.startswith("/guides/"):
+                    slug = path[len("/guides/"):].strip("/")
+                    page = guides.render_item(slug, catalog)
+                    if page is None:
+                        self._send_json(404, {"ok": False, "error": "not_found",
+                                              "message": "unknown_guide"})
                     else:
                         self._send_html(200, page, cache="public, max-age=600")
                 elif path == "/favicon.ico":

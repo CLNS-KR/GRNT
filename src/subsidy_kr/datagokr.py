@@ -20,6 +20,7 @@ import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
 from .gov24 import Gov24Error, encode_key
+from .version import __version__
 
 MAX_PER_PAGE = 1000
 
@@ -42,7 +43,7 @@ class DataGoKrClient:
                  timeout: float = 20.0, max_retries: int = 2,
                  sleep: Callable[[float], None] = time.sleep,
                  opener: Optional[Callable[[str], bytes]] = None,
-                 user_agent: str = "grnt/0.2 (+data.go.kr)") -> None:
+                 user_agent: str = f"grnt/{__version__} (+data.go.kr)") -> None:
         if not str(service_key or "").strip():
             raise Gov24Error(
                 "service_key_missing",

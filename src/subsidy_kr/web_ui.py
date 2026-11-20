@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from . import conditions, programs, regions, site_verification
+from . import conditions, guides, programs, regions, site_verification
 from .version import __version__
 
 SERVICE_NAME = "GRNT"
@@ -166,6 +166,20 @@ details p{margin:6px 0 0}
 .report-size{margin:12px 0 0;padding:11px 13px;border-radius:11px;background:var(--info-soft);color:var(--info);font-size:13px}
 .report-size ul{margin:6px 0 0;padding-left:18px}
 .report-size li{margin:2px 0}
+.guide-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 20px;
+  padding-left:18px;margin:8px 0 0;line-height:1.75;font-size:13.5px}
+@media (max-width:680px){.guide-list{grid-template-columns:1fr}}
+.answer{margin:14px 0 0;padding:14px 16px;border-radius:12px;background:var(--brand-soft);
+  color:var(--brand-ink);font-size:15px;font-weight:600;line-height:1.65}
+.answer b{display:block;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-soft);margin-bottom:4px;font-weight:800}
+.checks{margin:8px 0 0;padding-left:20px;line-height:1.85;font-size:14px}
+.checks li{margin:5px 0}
+pre.code{margin:10px 0 0;padding:12px 14px;border-radius:10px;background:var(--bg);
+  border:1px solid var(--line);overflow-x:auto;font-size:12.5px;line-height:1.6;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.crumb{margin:14px 0 0;font-size:12.5px;color:var(--ink-soft)}
+.crumb a{color:var(--ink-soft)}
 """
 
 
@@ -294,9 +308,38 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         notice=notice,
         count=count,
         generated=generated,
+        guides_footer=guides.footer_html(),
+        extra_script=ENTRY_SCRIPT,
         verification=site_verification.meta_tags(),
     )
 
+
+ENTRY_SCRIPT = """
+(function(){
+  // 가이드 페이지에서 넘어온 ?q=·?track= 로 폼을 미리 채우고 바로 조회한다.
+  // 저장소·쿠키를 쓰지 않고 현재 주소만 읽는다.
+  try{
+    var params = new URLSearchParams(window.location.search || '');
+    var track = params.get('track');
+    if (track === 'personal' || track === 'business' || track === 'agent') {
+      var radio = document.querySelector('input[name=track][value="' + track + '"]');
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    }
+    var q = params.get('q');
+    if (q) {
+      var keyword = document.getElementById('keyword');
+      var form = document.getElementById('check');
+      if (keyword && form) {
+        keyword.value = q;
+        form.dispatchEvent(new Event('submit', {cancelable: true}));
+      }
+    }
+  }catch(error){}
+})();
+"""
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="ko">
@@ -539,11 +582,14 @@ PAGE_TEMPLATE = """<!doctype html>
       구조화된 신청자격(업력·연령·지역·대상·성별)을 대조합니다. AI가 문장을 읽고 추측하지 않습니다.</p>
       <div class="links">
         <a href="/s/">주제별 지원금 모아보기</a>
+        <a href="/guides/">자주 묻는 지원금 질문</a>
         <a href="/v1/meta">서비스·데이터 상태</a>
         <a href="/v1/stats">익명 사용 통계</a>
         <a href="/llms.txt">AI·개발자용 안내</a>
       </div>
     </section>
+
+    {guides_footer}
 
     <p class="foot">
       <strong>개인정보</strong> — 이름·주민등록번호·전화번호를 받지 않습니다. 입력한 나이·지역·소득구간·
@@ -1250,6 +1296,7 @@ PAGE_TEMPLATE = """<!doctype html>
   }});
 }})();
 </script>
+<script>{extra_script}</script>
 </body>
 </html>
 """

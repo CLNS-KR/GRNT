@@ -54,6 +54,8 @@ Sitemap: {root}/sitemap.xml
 
 
 def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> str:
+    from . import guides
+
     root = base_url(base)
     stats = catalog.stats() if catalog is not None else {}
     state = (catalog.meta.get("catalog_state") if catalog is not None else "sample") or "sample"
@@ -61,6 +63,8 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
     if catalog is not None:
         generated = str(catalog.meta.get("generated_on") or catalog.meta.get("fetched_at") or "")[:10]
     tool_count = len(mcp_tools())
+    guide_count = guides.GUIDE_COUNT
+    guides_section = guides.llms_section(catalog, base=root)
     data_line = (
         f"> 카탈로그: {state} · 제도 {stats.get('services', 0):,}건"
         f"(개인·가구 {stats.get('personal', 0):,} · 창업·기업 {stats.get('business', 0):,}) · "
@@ -90,6 +94,8 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
 - [내 조건으로 판정]({root}/): 로그인·주민등록번호 없이 30초 조건 선택 → 후보·사유·신청기한.
   상단에서 **개인·가구**와 **창업·소상공인·기업**을 전환합니다.
 - [주제·지역별 모음]({root}/s/): 청년·출산·주거·구직·소상공인·창업·R&D, 시·도별 목록.
+- [질문형 가이드]({root}/guides/): \"청년 월세 지원 조건\" 같은 질문 {guide_count}개에
+  한 줄 기준·확인 조건·지금 열린 공고·흔한 오해를 붙인 페이지. FAQPage 구조화 데이터 포함.
 - [서비스·데이터 상태]({root}/v1/meta): 카탈로그 상태, 판정 등급 정의, 두 트랙·자격 코드·출처.
 - [익명 사용 통계]({root}/v1/stats): IP·쿠키·프로필을 저장하지 않은 일별 호출 수.
 
@@ -122,11 +128,12 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
   창업진흥원 K-Startup(15125364, 이용허락범위 제한 없음) ·
   중소벤처기업부 기업마당(15157820, 출처표시·변경금지 — 원문 문구를 그대로 보존하며 출처를 표시합니다).
 - 이 서비스는 신청 대행·법률 자문을 하지 않으며, 최종 수급·선정 여부는 소관기관 심사로 결정됩니다.
-"""
+
+{guides_section}"""
 
 
 def sitemap_xml(catalog: Catalog, base: Optional[str] = None) -> str:
-    from . import pseo
+    from . import guides, pseo
 
     root = base_url(base)
     lastmod = str(catalog.meta.get("generated_on") or catalog.meta.get("fetched_at")
@@ -143,6 +150,15 @@ def sitemap_xml(catalog: Catalog, base: Optional[str] = None) -> str:
     <loc>{root}{path}</loc>
     <lastmod>{lastmod}</lastmod>
     <changefreq>weekly</changefreq>
+    <priority>{priority}</priority>
+  </url>""")
+    # 질문형 가이드 — AI 인용·검색 유입의 주 진입점이라 사이트맵 최상위에 함께 넣는다.
+    for path in guides.paths():
+        priority = "0.7" if path == "/guides/" else "0.6"
+        entries.append(f"""  <url>
+    <loc>{root}{path}</loc>
+    <lastmod>{lastmod}</lastmod>
+    <changefreq>monthly</changefreq>
     <priority>{priority}</priority>
   </url>""")
     body = "\n".join(entries)

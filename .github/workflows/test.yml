@@ -47,5 +47,9 @@ jobs:
               headers={"Content-Type": "application/json"}, method="POST")
           with urllib.request.urlopen(request, timeout=5) as response:
               assert len(json.loads(response.read())["result"]["tools"]) == 8
+          status, body = get("/guides/")
+          assert status == 200
+          status, body = get("/guides/cheongnyeon-wolse")
+          assert status == 200 and b"FAQPage" in body
           print("smoke ok")
           PY

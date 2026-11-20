@@ -30,7 +30,7 @@ FLAG_ERROR = "errors"
 FLAG_SAMPLE = "sample_catalog"
 
 FIXED_PATHS = (
-    "/", "/s/", "/healthz", "/robots.txt", "/llms.txt", "/sitemap.xml",
+    "/", "/s/", "/guides/", "/guides", "/healthz", "/robots.txt", "/llms.txt", "/sitemap.xml",
     "/.well-known/mcp/server-card.json", "/v1/meta", "/v1/mcp", "/v1/stats",
     "/v1/tools", "/mcp", "/favicon.ico", "/404",
 )
@@ -55,12 +55,15 @@ def safe_key(value: Any) -> str:
 def _known_paths() -> frozenset:
     paths = set(FIXED_PATHS)
     try:
-        from . import pseo
+        from . import guides, pseo
 
         for spec in pseo.TOPICS:
             paths.add(f"/s/{spec['slug']}")
         for slug in pseo.SIDO_SLUGS.values():
             paths.add(f"/s/{slug}")
+        # 질문형 가이드도 슬러그별 버킷으로 남겨 어떤 질문이 유입을 만드는지 센다.
+        for slug in guides.slugs():
+            paths.add(f"/guides/{slug}")
     except Exception:  # noqa: BLE001 - 카탈로그가 없어도 카운터는 돌아야 한다
         pass
     # 카탈로그를 열지 않고도 정적 주제·지역 슬러그를 즉시 구성한다.

@@ -21,9 +21,10 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from . import (agent_report, conditions, engine, local_portals, models, programs, regions,
+from . import (agent_report, conditions, engine, guides, local_portals, models, programs, regions,
                snapshots, usage)
 from .catalog import Catalog
+from .version import __version__
 
 SCHEMA_VERSION = "1.1"
 SCOPE_LIMITS_KO = [
@@ -420,6 +421,8 @@ def tool_compare_ledgers(args: Dict[str, Any], catalog: Catalog,
 # 툴 5 — get_service_meta
 # ---------------------------------------------------------------------------
 def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = None) -> Dict[str, Any]:
+    from . import static_files
+
     latest = snapshots.latest_day(snapshots.snapshot_dir(data_dir_hint()))
     payload: Dict[str, Any] = {
         "service": "GRNT",
@@ -498,6 +501,16 @@ def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = N
             "counter_granularity": "일별 · 툴 · 판정 등급 (IP·쿠키·프로필 미저장)",
         },
         "scope_limits_ko": SCOPE_LIMITS_KO,
+        "guides": {
+            "index_url": static_files.base_url() + "/guides/",
+            "count": guides.GUIDE_COUNT,
+            "has_faq_json_ld": True,
+            "note_ko": (
+                "\"청년 월세 지원 조건\"처럼 자주 묻는 질문마다 한 페이지(FAQPage)를 두었습니다. "
+                "한 줄 기준·확인 조건·지금 열린 공고·흔한 오해를 담고, 전체 목록은 /llms.txt 와 "
+                "/sitemap.xml 에도 있습니다."
+            ),
+        },
         "tools": [definition["name"] for definition in TOOL_DEFS],
         "stats": catalog.stats(),
     }
@@ -804,12 +817,12 @@ def mcp_tools() -> List[Dict[str, Any]]:
 def mcp_manifest() -> Dict[str, Any]:
     return {
         "name": "grnt",
-        "version": "grnt/0.2",
+        "version": f"grnt/{__version__}",
         "description": (
             "GRNT — 한국 개인·창업 지원금 자격 판정 MCP. 정부24 보조금24 자격 코드와 "
             "K-Startup·기업마당 공고의 신청자격으로 결정론 판정하고, 사유·누락 정보·출처를 함께 준다."
         ),
-        "serverInfo": {"name": "grnt", "version": "grnt/0.2"},
+        "serverInfo": {"name": "grnt", "version": f"grnt/{__version__}"},
         "tools": [
             {"name": d["name"], "title": d["title_ko"],
              "description": d["description_ko"], "inputSchema": d["input_schema"]}

@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from . import programs
+from .version import __version__
 from .datagokr import DataGoKrClient
 
 BASE_URL = "https://apis.data.go.kr/1421000/bizinfo/pblancBsnsService"
@@ -27,7 +28,7 @@ class BizinfoClient(DataGoKrClient):
                  opener: Optional[Callable[[str], bytes]] = None) -> None:
         kwargs: Dict[str, Any] = {"timeout": timeout, "max_retries": max_retries,
                                   "opener": opener,
-                                  "user_agent": "grnt/0.2 (+data.go.kr 15157820)"}
+                                  "user_agent": f"grnt/{__version__} (+data.go.kr 15157820)"}
         if sleep is not None:
             kwargs["sleep"] = sleep
         super().__init__(service_key, base_url, **kwargs)

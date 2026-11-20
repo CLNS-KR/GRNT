@@ -85,6 +85,7 @@ class HttpTest(unittest.TestCase):
         self.assertIn("<urlset", sitemap)
         _, llms, _ = self._get("/llms.txt")
         self.assertIn("search_subsidies", llms)
+        self.assertIn("질문형 가이드", llms)
         _, card, _ = self._get("/.well-known/mcp/server-card.json")
         self.assertEqual(len(json.loads(card)["tools"]), 8)
 
@@ -96,6 +97,18 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("청년", body)
         self.assertEqual(self._status("/s/does-not-exist"), 404)
+
+    def test_guides_routes(self):
+        status, body, _ = self._get("/guides/")
+        self.assertEqual(status, 200)
+        self.assertIn("자주 묻는 지원금 질문", body)
+        status, body, _ = self._get("/guides")
+        self.assertEqual(status, 200)
+        status, body, _ = self._get("/guides/cheongnyeon-wolse")
+        self.assertEqual(status, 200)
+        self.assertIn("FAQPage", body)
+        self.assertIn("한 줄 기준", body)
+        self.assertEqual(self._status("/guides/does-not-exist"), 404)
 
     def test_manifest_and_meta(self):
         _, body, _ = self._get("/v1/mcp")
@@ -160,7 +173,8 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(self._status("/v1/tools/search_subsidies", "OPTIONS"), 204)
 
     def test_head_requests(self):
-        for path in ("/", "/healthz", "/s/", "/robots.txt", "/sitemap.xml", "/v1/stats"):
+        for path in ("/", "/healthz", "/s/", "/guides/", "/guides/cheongnyeon-wolse",
+                     "/robots.txt", "/sitemap.xml", "/v1/stats"):
             self.assertEqual(self._status(path, "HEAD"), 200, path)
 
     def test_unknown_route_and_payload_limit(self):
