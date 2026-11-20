@@ -3,8 +3,9 @@
 원칙
 ----
 1. **외부 의존 0**: CSS·JS·아이콘 전부 인라인(CDN·폰트·트래커 없음). CSP가 외부 로드를 막는다.
-2. **개인정보 최소**: 주민등록번호·이름·연락처를 받지 않는다. 입력값은 요청 1회로만 쓰고
-   서버에 저장하지 않는다(카운터에도 남기지 않음).
+2. **개인정보 최소**: 판정 폼에서는 주민등록번호·이름·연락처를 받지 않는다. 입력값은 요청 1회로만
+   쓰고 서버에 저장하지 않는다(카운터에도 남기지 않음). 예외는 맨 아래 **문의 카드** 하나로,
+   거기 직접 적은 연락처만 `POST /v1/inquiry` 로 보내 회신 목적으로 보관하고 화면은 접수번호만 받는다.
 3. **단정 금지**: 판정 문구는 "가능성/확인 필요/정보 부족/해당 없음" 네 가지로만 쓴다.
 4. **근거 우선**: 카드마다 사유·선정기준 원문·문의처·기준일·출처를 접어서 함께 보여 준다.
 5. **두 트랙**: '개인·가구'와 '창업·소상공인·기업'을 한 화면에서 전환한다.
@@ -208,6 +209,15 @@ pre.code{margin:10px 0 0;padding:12px 14px;border-radius:10px;background:var(--b
 .share-bar button:hover{border-color:var(--brand);color:var(--brand-ink)}
 .share-flash{font-size:12.5px;font-weight:700;color:var(--ok)}
 .share-flash.is-error{color:var(--danger)}
+/* 사전 신청·문의 미니 카드 — 푸터 바로 위. 배경·글자 모두 토큰만 칠한다(다크 모드 대비). */
+.inquiry{margin-top:22px;padding:18px 20px}
+.inquiry h2{font-size:15.5px}
+.inquiry .sub{margin-bottom:12px}
+.inquiry .row{display:grid;grid-template-columns:1.15fr 1fr;gap:12px}
+@media (max-width:680px){.inquiry .row{grid-template-columns:1fr}}
+.inquiry textarea{min-height:72px;height:72px;font-family:inherit;font-size:14px;line-height:1.6;
+  resize:vertical}
+.inquiry-note{margin:10px 0 0;font-size:11.5px;color:var(--ink-soft);line-height:1.65}
 """
 
 
@@ -342,7 +352,7 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         share_origin=static_files.base_url(),
         share_keys=",".join(SHARE_PARAM_KEYS),
         share_script=SHARE_SCRIPT,
-        extra_script=ENTRY_SCRIPT + BATCH_SCRIPT,
+        extra_script=ENTRY_SCRIPT + BATCH_SCRIPT + INQUIRY_SCRIPT,
         verification=site_verification.meta_tags(),
     )
 
@@ -546,6 +556,71 @@ BATCH_SCRIPT = """
 })();
 """
 
+# 사전 신청·문의 — 푸터 위 미니 카드. 연락처는 입력한 그대로 서버로 보내고, 응답에서는
+# 되돌려 받지 않는다(접수번호만 표시). 브라우저 저장소는 쓰지 않는다.
+INQUIRY_SCRIPT = """
+(function(){
+  var send = document.getElementById('inquiry-send');
+  if (!send) { return; }
+  var contactEl = document.getElementById('inquiry-contact');
+  var topicEl = document.getElementById('inquiry-topic');
+  var messageEl = document.getElementById('inquiry-message');
+  var statusEl = document.getElementById('inquiry-status');
+
+  function say(text){ statusEl.textContent = text; }
+
+  function send_inquiry(){
+    var contact = String(contactEl.value || '').replace(/\\s+/g, ' ').trim();
+    var message = String(messageEl.value || '').trim();
+    if (contact.length < 3) {
+      say('회신받을 연락처를 3자 이상 적어 주세요.');
+      contactEl.focus();
+      return;
+    }
+    if (contact.length > 120) {
+      say('연락처는 120자까지 쓸 수 있습니다.');
+      return;
+    }
+    if (message.length > 500) {
+      say('문의 내용은 500자까지 쓸 수 있습니다.');
+      return;
+    }
+    send.disabled = true;
+    say('접수 중…');
+    fetch('/v1/inquiry', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({contact: contact, topic: topicEl.value, message: message})
+    }).then(function(response){
+      return response.json().then(function(body){ return {ok: response.ok, body: body}; })
+        .catch(function(){ return {ok: false, body: {}}; });
+    }).then(function(out){
+      var data = out.body || {};
+      if (!out.ok || !data.ok) {
+        throw new Error(data.message_ko || data.error || 'HTTP 오류');
+      }
+      say(data.duplicate
+        ? '이미 접수된 내용입니다. 남겨 주신 연락처로 회신드립니다.'
+        : '접수됐습니다(접수번호 ' + (data.receipt || '-') + '). 남겨 주신 연락처로 회신드립니다.');
+      contactEl.value = '';
+      messageEl.value = '';
+    }).catch(function(error){
+      say('접수하지 못했습니다(' + error.message + '). 잠시 뒤 다시 시도해 주세요.');
+    }).finally(function(){
+      send.disabled = false;
+    });
+  }
+
+  send.addEventListener('click', send_inquiry);
+  messageEl.addEventListener('keydown', function(event){
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      send_inquiry();
+    }
+  });
+})();
+"""
+
 # 결과 공유에 담는 쿼리 파라미터 — 개인식별·준식별 값(출생연도·소득구간·자녀 연도 등)은
 # 링크에 넣지 않는다. 이 목록이 곧 링크에 들어가는 유일한 키다.
 SHARE_PARAM_KEYS = ("track", "sido", "sigungu", "q")
@@ -738,7 +813,7 @@ PAGE_TEMPLATE = """<!doctype html>
 <meta name="color-scheme" content="light dark">
 <title>{service_name} · {title}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231c5bd8'/%3E%3Ctext x='16' y='23' font-size='16' font-weight='700' fill='white' text-anchor='middle' font-family='sans-serif'%3EG%3C/text%3E%3C/svg%3E">
-<meta name="description" content="나이·거주지·소득구간·상황, 또는 사업자 조건(예비창업·업력·소상공인·중소기업)만 고르면 개인 지원금과 창업·기업 지원사업 후보와 근거를 30초 안에 정리합니다. 로그인 없음, 주민등록번호 없음, 서버 저장 없음. 확정 판정이 아닌 사전 점검입니다.">
+<meta name="description" content="나이·거주지·소득구간·상황, 또는 사업자 조건(예비창업·업력·소상공인·중소기업)만 고르면 개인 지원금과 창업·기업 지원사업 후보와 근거를 30초 안에 정리합니다. 로그인 없음, 주민등록번호 없음, 판정 입력은 서버에 저장하지 않음. 확정 판정이 아닌 사전 점검입니다.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="GRNT — 개인·창업 통합 지원금 판정기">
 <meta property="og:description" content="Grants, simplified. 개인 복지 지원금과 창업·소상공인·기업 지원사업을 한 화면에서 조건별로 판정합니다. 로그인 없이 30초.">
@@ -1012,7 +1087,9 @@ PAGE_TEMPLATE = """<!doctype html>
       구조화된 신청자격(업력·연령·지역·대상·성별)을 대조합니다. AI가 문장을 읽고 추측하지 않습니다.</p>
       <div class="links">
         <a href="#batch-card">거래처 일괄 매칭(익명 CSV)</a>
+        <a href="#inquiry-card">대량 매칭·연동 문의</a>
         <a href="/s/">주제별 지원금 모아보기</a>
+        <a href="/regions/">시·도별 지원금</a>
         <a href="/guides/">자주 묻는 지원금 질문</a>
         <a href="/v1/meta">서비스·데이터 상태</a>
         <a href="/v1/stats">익명 사용 통계</a>
@@ -1022,12 +1099,51 @@ PAGE_TEMPLATE = """<!doctype html>
 
     {guides_footer}
 
+    <section class="card inquiry" id="inquiry-card">
+      <h2>세무·노무사 리포트 · 대량 매칭 문의 <span class="tag">선택</span></h2>
+      <p class="sub">거래처 수십~수백 곳을 한 번에 돌리는 <strong>일괄 익명 매칭</strong>이나
+      <strong>API·MCP 연동</strong>을 사무소 업무에 붙이는 방법을 묻는 곳입니다.
+      남겨 주신 연락처로만 회신합니다.</p>
+      <div class="row">
+        <label class="field">
+          <span class="lab">연락처 <span class="opt">이메일 또는 전화</span></span>
+          <input type="text" id="inquiry-contact" name="contact" maxlength="120"
+                 autocomplete="off" placeholder="회신받을 이메일 또는 연락처">
+          <span class="hint">3~120자. 회신 목적으로만 쓰고 통계에는 넣지 않습니다.</span>
+        </label>
+        <label class="field">
+          <span class="lab">문의 유형</span>
+          <select id="inquiry-topic" name="topic">
+            <option value="batch_report">거래처 리포트·대량 매칭</option>
+            <option value="api_mcp">API·MCP 연동</option>
+            <option value="other">그 밖의 문의</option>
+          </select>
+          <span class="hint">리포트는 거래처 50~300곳까지 한 번에 처리합니다.</span>
+        </label>
+      </div>
+      <label class="field" style="margin-top:12px">
+        <span class="lab">문의 내용 <span class="opt">선택 · 500자</span></span>
+        <textarea id="inquiry-message" name="message" rows="3" maxlength="500"
+          placeholder="예: 거래처 80곳을 매달 돌리고 싶습니다. CSV 형식과 결과 전달 방법이 궁금합니다."></textarea>
+      </label>
+      <div class="actions">
+        <button class="primary" type="button" id="inquiry-send">문의 접수</button>
+      </div>
+      <div class="status" id="inquiry-status" role="status" aria-live="polite"></div>
+      <p class="inquiry-note">연락처는 회신 목적으로만 서버에 보관하고(최대 180일),
+      <a href="/v1/stats">사용 통계</a>에는 넣지 않습니다. 이 화면의 판정 입력(나이·지역·소득)은
+      여전히 저장하지 않습니다.</p>
+    </section>
+
     <p class="foot">
-      <strong>개인정보</strong> — 이름·주민등록번호·전화번호를 받지 않습니다. 입력한 나이·지역·소득구간·
-      사업자 조건은 판정 계산에만 쓰고 서버에 저장하지 않습니다(브라우저 저장소도 쓰지 않음). 서버에는
-      툴 이름과 판정 등급의 <em>익명 일별 횟수</em>만 남습니다. 결과가 <strong>0건으로 끝난
-      검색어</strong>만, 지역명·연락처·숫자를 지운 30자 이내 형태로 남겨 다음 데이터 확충에 씁니다.
-      <a href="/v1/stats">남기는 항목 보기</a><br>
+      <strong>개인정보</strong> — <strong>판정 입력으로는</strong> 이름·주민등록번호·전화번호를
+      받지 않습니다. 입력한 나이·지역·소득구간·사업자 조건은 판정 계산에만 쓰고 서버에 저장하지 않습니다
+      (브라우저 저장소도 쓰지 않음). 서버에는 툴 이름과 판정 등급의 <em>익명 일별 횟수</em>만
+      남습니다. 결과가 <strong>0건으로 끝난 검색어</strong>만, 지역명·연락처·숫자를 지운 30자 이내
+      형태로 남겨 다음 데이터 확충에 씁니다. <a href="/v1/stats">남기는 항목 보기</a>
+      <br>예외는 위의 <strong>문의 카드</strong> 하나입니다 — 거기 적어 보낸 연락처는 회신 목적만으로
+      따로 보관하고(최대 180일), 이 통계에는 건수도 넣지 않습니다.
+      <br>
       <strong>한계</strong> — 공개 데이터 기반 사전 점검이며 수급·선정 자격을 확정하지 않습니다.
       재산·거주기간 등 코드로 표현되지 않은 요건과 지자체 원본 공백, 공고문의 서술형 요건은
       &lsquo;확인 필요&rsquo;로 표시합니다. 창업·기업 사업의 &lsquo;받을 가능성 높음&rsquo;은 신청자격

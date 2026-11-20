@@ -13,6 +13,12 @@
 남깁니다: 전화번호·주민등록번호·이메일·URL·@핸들, 2자리 이상 숫자, 시·도/시·군·구 이름.
 프로필 입력값(나이·소득구간·임신 여부 등)은 검색어와 무관하게 저장하지 않습니다.
 
+문의 폼(다른 경로)
+--------------------
+이 모듈은 사전 신청·문의 폼(`POST /v1/inquiry`)의 검증·저장도 맡습니다. 이때만 사용자가
+직접 적어 보낸 연락처를 `inquiries` 표에 남기며, 회신 목적 외에는 쓰지 않고 이 통계·익명
+카운터에는 넣지 않습니다(`inquiry_summary` 는 주제별 건수만 읽습니다).
+
 한계: 무료 플랜은 영구 디스크가 없어 재배포 시 0으로 돌아갑니다(일별 집계라 감수).
 """
 from __future__ import annotations
@@ -40,11 +46,12 @@ FLAG_ERROR = "errors"
 FLAG_SAMPLE = "sample_catalog"
 
 FIXED_PATHS = (
-    "/", "/s/", "/guides/", "/guides", "/healthz", "/robots.txt", "/llms.txt", "/sitemap.xml",
+    "/", "/s/", "/guides/", "/guides", "/regions/", "/regions",
+    "/healthz", "/robots.txt", "/llms.txt", "/sitemap.xml",
     "/.well-known/mcp/server-card.json", "/v1/meta", "/v1/mcp", "/v1/stats",
     "/v1/tools", "/v1/report/export.csv", "/v1/report/print.html",
     "/v1/batch-match", "/v1/batch-match/export.csv", "/v1/batch-match/reports.html",
-    "/v1/batch-match/sample.csv", "/mcp", "/favicon.ico", "/404",
+    "/v1/batch-match/sample.csv", "/v1/inquiry", "/mcp", "/favicon.ico", "/404",
 )
 
 KEY_RE = re.compile(r"[^0-9A-Za-z._:/{}-]")
@@ -54,6 +61,21 @@ MAX_KEY = 64
 MAX_QUERY_CHARS = 30      # 저장하는 검색어 최대 길이
 TOP_ZERO_QUERIES = 20     # 날짜별로 노출하는 상위 개수(전체 개수는 total/distinct 로 따로)
 TRACKS = ("personal", "business", "all")
+
+# --- 사전 신청·문의 폼 ---------------------------------------------------------
+# 사용자가 문의 카드에 **직접 적어 보낸 연락처**만 저장한다(판정 입력과 다른 경로).
+# 연락처는 회신 목적으로만 쓰고, 통계(`stats_payload`)·익명 카운터에는 절대 넣지 않는다.
+INQUIRY_TOPICS = ("batch_report", "api_mcp", "other")
+INQUIRY_TOPIC_LABELS = {
+    "batch_report": "세무·노무사 거래처 리포트·대량 매칭",
+    "api_mcp": "API·MCP 연동",
+    "other": "그 밖의 문의",
+}
+INQUIRY_CONTACT_MIN = 3
+INQUIRY_CONTACT_MAX = 120
+INQUIRY_MESSAGE_MAX = 500
+INQUIRY_DAILY_CAP = 200      # 같은 날 접수 상한(스팸으로 무료 인스턴스 디스크를 채우지 않게)
+INQUIRY_KEEP_DAYS = 180      # 회신 목적이 끝난 연락처 보관 기간
 
 _EMAIL_RE = re.compile(r"[0-9A-Za-z._%+\-]+@[0-9A-Za-z.\-]+\.[A-Za-z]{2,}")
 _URL_RE = re.compile(r"(?i)(?:https?://|www\.)\S+")
@@ -66,6 +88,8 @@ _SPACE_RE = re.compile(r"\s+")
 _HAS_LETTER_RE = re.compile(r"[가-힣]")
 _HAS_WORD_RE = re.compile(r"[A-Za-z]{2,}")
 _HAS_ANY_RE = re.compile(r"[0-9A-Za-z가-힣]")
+_CONTACT_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_MESSAGE_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def today_kst() -> str:
@@ -213,6 +237,103 @@ def safe_tag(value: Any) -> str:
     return tag if tag in _tag_labels() else ""
 
 
+# --- 사전 신청·문의 폼 ---------------------------------------------------------
+# 판정 입력과 다른 경로다. 사용자가 문의 카드에 직접 적어 보낸 연락처만 다루고,
+# 아래 함수들은 판정 프로필(나이·지역·소득·임신 등)을 읽지 않는다.
+INQUIRY_ERRORS_KO = {
+    "contact_too_short": f"연락처를 {INQUIRY_CONTACT_MIN}자 이상 적어 주세요.",
+    "contact_too_long": f"연락처는 {INQUIRY_CONTACT_MAX}자까지 쓸 수 있습니다.",
+    "invalid_topic": "문의 유형을 다시 선택해 주세요.",
+    "message_too_long": f"문의 내용은 {INQUIRY_MESSAGE_MAX}자까지 쓸 수 있습니다.",
+    "daily_cap_reached": "오늘 접수 한도에 닿았습니다. 내일 다시 보내 주시거나 API·MCP 주소로 남겨 주세요.",
+    "store_unavailable": "지금은 문의를 저장할 수 없습니다. 잠시 뒤 다시 시도해 주세요.",
+}
+
+
+def clean_contact(value: Any) -> str:
+    """연락처 1줄 — 제어문자·줄바꿈을 공백으로 바꾸고 앞뒤 공백을 뗀다."""
+    text = _CONTACT_CTRL_RE.sub(" ", str(value or "")[:400])
+    return _SPACE_RE.sub(" ", text).strip()
+
+
+def clean_message(value: Any) -> str:
+    """문의 내용 — 줄바꿈·탭은 남기고 나머지 제어문자만 지운다."""
+    text = _MESSAGE_CTRL_RE.sub(" ", str(value or "")[:2000])
+    return text.strip()
+
+
+def normalize_inquiry(payload: Any) -> tuple:
+    """요청 본문 → `(정리된 값, 오류 코드)`. 오류가 없으면 두 번째 값이 None.
+
+    `contact` 3~120자 · `topic` 은 `INQUIRY_TOPICS` 중 하나 · `message` 는 선택 0~500자.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    contact = clean_contact(data.get("contact"))
+    if len(contact) < INQUIRY_CONTACT_MIN:
+        return {}, "contact_too_short"
+    if len(contact) > INQUIRY_CONTACT_MAX:
+        return {}, "contact_too_long"
+    topic = str(data.get("topic") or "").strip()
+    if topic not in INQUIRY_TOPICS:
+        return {}, "invalid_topic"
+    message = clean_message(data.get("message"))
+    if len(message) > INQUIRY_MESSAGE_MAX:
+        return {}, "message_too_long"
+    return {"contact": contact, "topic": topic, "message": message}, None
+
+
+def save_inquiry(store: Any, data: Dict[str, Any], day: Optional[str] = None) -> Dict[str, Any]:
+    """정리된 문의를 저장한다 — 같은 날 같은 내용은 한 번만 남긴다.
+
+    저장에 실패해도 예외를 밖으로 던지지 않고 `stored: False`를 돌려준다(응답이 깨지지 않게).
+    """
+    stamp = day or today_kst()
+    if store is None:
+        return {"stored": False, "duplicate": False, "error": "store_unavailable"}
+    contact = str(data.get("contact") or "")
+    topic = str(data.get("topic") or "")
+    message = str(data.get("message") or "")
+    try:
+        if store.inquiry_exists(stamp, topic, contact, message):
+            return {"stored": False, "duplicate": True}
+        if store.inquiry_count(stamp) >= INQUIRY_DAILY_CAP:
+            return {"stored": False, "duplicate": False, "error": "daily_cap_reached"}
+        row_id = store.add_inquiry(stamp, topic, contact, message)
+    except Exception:  # noqa: BLE001 - 저장 실패가 응답 형식을 바꾸지 않게
+        return {"stored": False, "duplicate": False, "error": "store_unavailable"}
+    return {"stored": True, "duplicate": False, "receipt": f"I{int(row_id):05d}"}
+
+
+def inquiry_summary(store: Any) -> Dict[str, Any]:
+    """주제별 접수 건수만 — 연락처·내용은 읽지 않는다(운영 확인용)."""
+    counts: Dict[str, int] = {}
+    try:
+        counts = store.inquiry_topic_counts() if store is not None else {}
+    except Exception:  # noqa: BLE001
+        counts = {}
+    total = sum(counts.values())
+    return {
+        "total": total,
+        "by_topic": [{"topic": topic, "label_ko": INQUIRY_TOPIC_LABELS[topic],
+                      "count": int(counts.get(topic, 0))}
+                     for topic in INQUIRY_TOPICS],
+        "stores_contact": True,
+        "in_usage_stats": False,
+        "keep_days": INQUIRY_KEEP_DAYS,
+    }
+
+
+def purge_inquiries(store: Any, keep_days: int = INQUIRY_KEEP_DAYS,
+                    day: Optional[str] = None) -> int:
+    """보관 기간이 지난 문의를 지운다(서버 기동 시 1회). 실패해도 기동을 막지 않는다."""
+    if store is None:
+        return 0
+    try:
+        return store.purge_inquiries(keep_days, day)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def zero_query_key(query: str, track: str = "all", tag: str = "") -> str:
     """0건 검색어 1건의 저장 키 — 검색어·트랙·분야를 JSON 한 줄로 묶는다."""
     payload = {"q": str(query or "")[:MAX_QUERY_CHARS],
@@ -240,12 +361,15 @@ def zero_entry(key: Any) -> Optional[tuple]:
 def _known_paths() -> frozenset:
     paths = set(FIXED_PATHS)
     try:
-        from . import guides, pseo
+        from . import guides, pseo, regions
 
         for spec in pseo.TOPICS:
             paths.add(f"/s/{spec['slug']}")
         for slug in pseo.SIDO_SLUGS.values():
             paths.add(f"/s/{slug}")
+        # 시·도별 허브도 슬러그별로 남겨 어떤 지역이 유입을 만드는지 센다.
+        for slug in regions.sido_slugs():
+            paths.add(f"/regions/{slug}")
         # 질문형 가이드도 슬러그별 버킷으로 남겨 어떤 질문이 유입을 만드는지 센다.
         for slug in guides.slugs():
             paths.add(f"/guides/{slug}")
@@ -447,6 +571,13 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
             },
             "granularity": ("date (YYYY-MM-DD, Asia/Seoul) · 경로 · 툴 · 판정 등급 · 0건/오류 · "
                             "0건 검색어(비식별, 최대 30자)"),
+            "inquiries": {
+                "separate_from_usage": True,
+                "in_this_payload": False,
+                "what_ko": ("문의 카드에 직접 적어 보낸 연락처는 회신 목적으로만 별도 표에 두며 "
+                            "이 통계에는 건수도 연락처도 넣지 않습니다."),
+                "keep_days": INQUIRY_KEEP_DAYS,
+            },
             "note_ko": (
                 "거주지·나이·소득구간·임신 여부 같은 입력값은 저장하지 않습니다. 알 수 없는 경로는 "
                 "/404 한 칸으로 합산하며, 재배포 시 카운터가 초기화될 수 있습니다. 검색어는 결과가 "

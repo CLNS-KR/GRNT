@@ -5,19 +5,21 @@
 - `HOST`(기본 0.0.0.0) · `PORT`(기본 8787)
 - `SUBSIDY_KR_DATA` 동기화 카탈로그 디렉터리(기본 `data/gov24`)
 - `SUBSIDY_KR_DB`   카운터·스냅샷 SQLite(기본 `data/app.sqlite`)
-- `GRNT_STATS_PATH` 익명 카운터만 따로 둘 SQLite 경로(영속 디스크·백업용, 선택)
+- `GRNT_STATS_PATH` 익명 카운터·문의 접수를 따로 둘 SQLite 경로(영속 디스크·백업용, 선택)
 - `PUBLIC_BASE_URL` robots/llms/sitemap 의 공개 주소
 - `GOOGLE_SITE_VERIFICATION`·`NAVER_SITE_VERIFICATION` 구글·네이버 소유확인 메타태그 값
 - `SITE_VERIFICATION_FILES` 루트에 서빙할 확인 파일 JSON(`{"naverXXXX.html": "..."}`)
 
 경로
 ----
-`GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/guides/`·`/guides/{slug}` 질문형 가이드 ·
+`GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/regions/`·`/regions/{slug}` 시·도별 허브 ·
+`/guides/`·`/guides/{slug}` 질문형 가이드 ·
 `/healthz` · `/v1/meta` · `/v1/stats` ·
 `/v1/mcp`(매니페스트) · `/mcp`·`/v1/mcp`(POST JSON-RPC) · `/v1/tools/{tool}`(POST) ·
 `/v1/batch-match`(POST JSON·CSV — 거래처 일괄 익명 매칭) ·
 `/v1/batch-match/export.csv`·`/v1/batch-match/reports.html`(POST) ·
 `/v1/batch-match/sample.csv`(GET) ·
+`/v1/inquiry`(POST JSON — 사전 신청·문의 접수) ·
 `/v1/report/export.csv`·`/v1/report/print.html`(POST 본문 또는 GET 쿼리 — 거래처 전달용 리포트) ·
 `/robots.txt` · `/llms.txt` · `/sitemap.xml` · `/.well-known/mcp/server-card.json` ·
 `/{확인파일}.html`(환경변수로 등록한 경우)
@@ -38,8 +40,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import batch_client, guides, mcp_http, pseo, site_verification, static_files, usage
-from .api import batch_export, call_tool, mcp_manifest, report_export
+from . import (batch_client, guides, mcp_http, pseo, regions, site_verification,
+               static_files, usage)
+from .api import batch_export, call_tool, mcp_manifest, report_export, submit_inquiry
 from .catalog import Catalog, data_dir_from_env, load_catalog
 from .store import Store
 from .version import __version__
@@ -54,6 +57,8 @@ REPORT_EXPORT_PATHS = ("/v1/report/export.csv", "/v1/report/print.html")
 BATCH_MATCH_PATH = "/v1/batch-match"
 BATCH_EXPORT_PATHS = ("/v1/batch-match/export.csv", "/v1/batch-match/reports.html")
 BATCH_SAMPLE_PATH = "/v1/batch-match/sample.csv"
+INQUIRY_PATH = "/v1/inquiry"
+INQUIRY_ERROR_STATUS = {"daily_cap_reached": 429, "store_unavailable": 503}
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -85,7 +90,7 @@ def default_db_path() -> str:
 
 
 def default_stats_path() -> str:
-    """익명 카운터 SQLite 경로 — `GRNT_STATS_PATH` 가 있으면 그곳(영속 디스크)을 쓴다.
+    """익명 카운터·문의 접수 SQLite 경로 — `GRNT_STATS_PATH` 가 있으면 그곳(영속 디스크)을 쓴다.
 
     무료 플랜은 영구 디스크가 없어 재배포 시 카운터가 초기화된다. 외부 유료 DB 없이
     살리려면 Render 디스크(또는 다른 영속 볼륨)를 `GRNT_STATS_PATH` 로 마운트하면 된다.
@@ -198,8 +203,10 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
         # --- 라우팅 ----------------------------------------------------------
         def do_HEAD(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
-            if (path in ("/", "/index.html", "/s", "/s/", "/guides", "/guides/")
-                    or path.startswith("/s/") or path.startswith("/guides/")):
+            if (path in ("/", "/index.html", "/s", "/s/", "/guides", "/guides/",
+                        "/regions", "/regions/")
+                    or path.startswith("/s/") or path.startswith("/guides/")
+                    or path.startswith("/regions/")):
                 self._head(200, "text/html; charset=utf-8")
             elif path == "/healthz":
                 self._head(200, "application/json; charset=utf-8")
@@ -261,6 +268,17 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                                               "message": "unknown_guide"})
                     else:
                         self._send_html(200, page, cache="public, max-age=600")
+                elif path in ("/regions", "/regions/"):
+                    self._send_html(200, regions.render_index(catalog),
+                                    cache="public, max-age=600")
+                elif path.startswith("/regions/"):
+                    slug = path[len("/regions/"):].strip("/")
+                    page = regions.render_item(slug, catalog)
+                    if page is None:
+                        self._send_json(404, {"ok": False, "error": "not_found",
+                                              "message": "unknown_region"})
+                    else:
+                        self._send_html(200, page, cache="public, max-age=600")
                 elif path == "/favicon.ico":
                     self._send_empty(204)
                 elif path == "/healthz":
@@ -305,6 +323,12 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     self.wfile.write(body)
                 elif path in REPORT_EXPORT_PATHS:
                     self._handle_report_export(path, report_args_from_query(self.path))
+                elif path == INQUIRY_PATH:
+                    self.send_response(405)  # 문의는 POST 로만 받는다
+                    self.send_header("Allow", "POST, OPTIONS")
+                    self.send_header("Content-Length", "0")
+                    self._common_headers()
+                    self.end_headers()
                 elif site_verification.file_body(path) is not None:
                     # 검색엔진 소유확인용 HTML 파일(환경변수 SITE_VERIFICATION_FILES 로만 열린다).
                     self._send_text(200, site_verification.file_body(path) or "",
@@ -328,6 +352,9 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                 return
             if path in REPORT_EXPORT_PATHS:
                 self._handle_report_export(path)
+                return
+            if path == INQUIRY_PATH:
+                self._handle_inquiry()
                 return
             if path.rstrip("/") in MCP_PATHS:
                 self._handle_mcp()
@@ -361,6 +388,41 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                 return
             status = 200 if result.get("ok") is not False else (
                 404 if result.get("error") == "unknown_tool" else 400)
+            self._send_json(status, result)
+
+        def _handle_inquiry(self) -> None:
+            """사전 신청·문의 접수 — 본문 `{contact, topic, message}` 만 받는다.
+
+            연락처·내용은 저장만 하고 응답에 되돌리지 않는다(같은 브라우저·중간 캐시에
+            개인정보를 한 번 더 남기지 않기 위해서). 거절 사유는 `error` 코드로만 알린다.
+            """
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "invalid_content_length"})
+                return
+            if length > MAX_BODY:
+                self._send_json(413, {"ok": False, "error": "payload_too_large"})
+                return
+            raw = self.rfile.read(length) if length else b""
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}")
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._send_json(400, {"ok": False, "error": "invalid_json"})
+                return
+            if not isinstance(payload, dict):
+                self._send_json(400, {"ok": False, "error": "invalid_argument",
+                                      "message": "request_body_must_be_object"})
+                return
+            try:
+                result = submit_inquiry(payload, store)
+            except Exception:  # noqa: BLE001 - 내부 정보를 노출하지 않는다
+                self._send_json(500, {"ok": False, "error": "internal_error"})
+                return
+            if result.get("ok"):
+                self._send_json(200, result)
+                return
+            status = INQUIRY_ERROR_STATUS.get(str(result.get("error") or ""), 400)
             self._send_json(status, result)
 
         def _handle_batch(self, path: str) -> None:
@@ -533,6 +595,7 @@ def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, db_path: str = "",
     catalog = load_catalog(os.path.join(data_dir, "catalog.json") if data_dir else None)
     store = Store(db_path)
     usage._known_paths()  # 시작 시 1회 계산해 첫 요청이 카탈로그를 다시 읽지 않게 한다
+    usage.purge_inquiries(store)  # 회신 목적이 끝난 문의 연락처를 보관 기간 뒤 지운다
     httpd = ThreadingHTTPServer((host, port), make_handler(catalog, store))
     print(f"GRNT listening on http://{host}:{port} "
           f"(catalog={catalog.meta.get('catalog_state')}, services={len(catalog.services)}, "

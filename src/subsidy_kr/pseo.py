@@ -247,7 +247,8 @@ def render_index(catalog: Catalog) -> str:
   </section>
   <section class="card">
     <h2>지역별 지원금</h2>
-    <p class="sub">지자체 제도는 소관기관명으로 지역을 판별합니다. 시·군·구 단위 판정은
+    <p class="sub">지자체 제도는 소관기관명으로 지역을 판별합니다. 시·도별 공고 수·분야 분포·마감 임박
+    목록은 <a href="/regions/">시·도별 지원금</a>에서 한 장으로 볼 수 있습니다. 시·군·구 단위 판정은
     <a href="/">판정 화면</a>에서 시·군·구를 함께 골라 주세요.</p>
     <ul style="line-height:2;padding-left:20px">{_links(areas)}</ul>
   </section>

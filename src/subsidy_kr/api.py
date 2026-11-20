@@ -16,6 +16,8 @@
 - 모든 응답에 `data_state`(`sample`|`gov24`|`kstartup`|`bizinfo`), `checked_at`,
   `disclaimer_ko`, 출처 URL/표기가 붙습니다.
 - 프로필은 **응답에 되돌려 쓰지 않습니다**(해석 결과만 요약). 저장도 하지 않습니다.
+- `POST /v1/inquiry` 는 툴이 아니라 **사전 신청·문의 접수** 창구입니다(`submit_inquiry`).
+  사용자가 직접 적은 연락처는 회신 목적만으로 저장하고 응답에 되돌리지 않습니다.
 """
 from __future__ import annotations
 
@@ -516,6 +518,21 @@ def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = N
                 "/sitemap.xml 에도 있습니다."
             ),
         },
+        "regions": {
+            "index_url": static_files.base_url() + regions.REGION_HUB_PATH,
+            "count": len(regions.SIDO_SLUGS),
+            "path_pattern": "/regions/{slug}",
+            "regions": [
+                {"sido": sido, "slug": slug, "url": static_files.base_url() + f"/regions/{slug}"}
+                for sido, slug in regions.SIDO_SLUGS.items()
+            ],
+            "has_faq_json_ld": True,
+            "note_ko": (
+                "시·도마다 지자체 공고 수·분야 분포·마감 임박 공고·시·군·구별 공고 수를 "
+                "카탈로그 집계로 정리한 허브 페이지입니다. 건수는 `stats` 와 같은 기준(마감 제외)이고, "
+                "금액·선정 확률은 추정하지 않습니다. 사람용 조회는 `/?track=personal&sido={시도}` 입니다."
+            ),
+        },
         "tools": [definition["name"] for definition in TOOL_DEFS],
         "stats": catalog.stats(),
     }
@@ -928,6 +945,59 @@ def call_tool(name: str, arguments: Optional[Dict[str, Any]], catalog: Catalog,
                   "message": type(exc).__name__}
     usage.record_tool(store, name, result, arguments)
     return result
+
+
+def submit_inquiry(payload: Any, store: Any = None,
+                   day: Optional[str] = None) -> Dict[str, Any]:
+    """`POST /v1/inquiry` — 사전 신청·문의 접수(리드 수집).
+
+    받는 것: `contact`(이메일·연락처 3~120자) · `topic`(`batch_report`|`api_mcp`|`other`) ·
+    `message`(선택 0~500자). 연락처는 회신 목적으로만 `inquiries` 표에 저장하고 **응답에
+    되돌려 보내지 않으며**(개인정보 재노출 금지) `/v1/stats` 에도 넣지 않는다. 판정 프로필과는
+    다른 경로라 나이·지역·소득 같은 입력은 읽지도 않는다.
+    """
+    clean, error = usage.normalize_inquiry(payload)
+    if error:
+        return {
+            "ok": False,
+            "error": error,
+            "message_ko": usage.INQUIRY_ERRORS_KO.get(error, "문의를 접수하지 못했습니다."),
+            "topics": inquiry_topics(),
+        }
+    saved = usage.save_inquiry(store, clean, day)
+    if saved.get("error"):
+        code = str(saved["error"])
+        return {
+            "ok": False,
+            "error": code,
+            "message_ko": usage.INQUIRY_ERRORS_KO.get(code, "문의를 접수하지 못했습니다."),
+            "topics": inquiry_topics(),
+        }
+    duplicate = bool(saved.get("duplicate"))
+    return {
+        "ok": True,
+        "stored": bool(saved.get("stored")),
+        "duplicate": duplicate,
+        "receipt": saved.get("receipt"),
+        "topic": clean["topic"],
+        "topic_label_ko": usage.INQUIRY_TOPIC_LABELS[clean["topic"]],
+        "message_ko": ("같은 내용이 이미 접수되어 있습니다. 회신드리겠습니다." if duplicate else
+                       "접수됐습니다. 남겨 주신 연락처로만 회신드립니다."),
+        "privacy": {
+            "contact_used_for": "reply_only",
+            "echoed_back": False,
+            "in_usage_stats": False,
+            "keep_days": usage.INQUIRY_KEEP_DAYS,
+        },
+        "topics": inquiry_topics(),
+        "checked_at": _now(),
+    }
+
+
+def inquiry_topics() -> List[Dict[str, str]]:
+    """문의 유형 목록(API·웹이 같은 표를 쓴다)."""
+    return [{"topic": topic, "label_ko": usage.INQUIRY_TOPIC_LABELS[topic]}
+            for topic in usage.INQUIRY_TOPICS]
 
 
 def text_summary(result: Dict[str, Any]) -> str:
