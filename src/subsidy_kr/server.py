@@ -13,6 +13,7 @@
 ----
 `GET /` 웹 UI · `/s/`·`/s/{slug}` 주제·지역 페이지 · `/healthz` · `/v1/meta` · `/v1/stats` ·
 `/v1/mcp`(매니페스트) · `/mcp`·`/v1/mcp`(POST JSON-RPC) · `/v1/tools/{tool}`(POST) ·
+`/v1/report/export.csv`·`/v1/report/print.html`(POST 본문 또는 GET 쿼리 — 거래처 전달용 리포트) ·
 `/robots.txt` · `/llms.txt` · `/sitemap.xml` · `/.well-known/mcp/server-card.json` ·
 `/{확인파일}.html`(환경변수로 등록한 경우)
 
@@ -33,7 +34,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
 from . import mcp_http, pseo, site_verification, static_files, usage
-from .api import call_tool, mcp_manifest
+from .api import call_tool, mcp_manifest, report_export
 from .catalog import Catalog, data_dir_from_env, load_catalog
 from .store import Store
 from .web_ui import render_page
@@ -42,6 +43,7 @@ MAX_BODY = 64 * 1024
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8787
 MCP_PATHS = ("/mcp", "/v1/mcp")
+REPORT_EXPORT_PATHS = ("/v1/report/export.csv", "/v1/report/print.html")
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -95,6 +97,25 @@ def _days_param(query: str) -> int:
         return int((parse_qs(query or "").get("days") or [""])[0])
     except (TypeError, ValueError):
         return usage.DEFAULT_DAYS
+
+
+def report_args_from_query(path: str) -> Dict[str, Any]:
+    """CSV·인쇄 뷰의 GET 쿼리를 `business_report` 인자로 바꿔 준다.
+
+    웹 화면이 `<a href>`·`window.open` 으로 바로 열 수 있게 하려는 통로이며, 숫자는
+    문자열 그대로 넘겨도 `agent_report` 가 숫자로 읽는다.
+    """
+    params = parse_qs(urlparse(path).query or "", keep_blank_values=False)
+    args: Dict[str, Any] = {}
+    for key, values in params.items():
+        value = values[-1]
+        if key in ("interest", "categories"):
+            args[key] = values
+        elif key == "include_closed":
+            args[key] = value.strip().lower() in ("1", "true", "yes", "y")
+        else:
+            args[key] = value
+    return args
 
 
 def make_handler(catalog: Catalog, store: Optional[Store] = None):
@@ -235,6 +256,8 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     query = urlparse(self.path).query
                     self._send_json(200, usage.stats_payload(store, _days_param(query)),
                                     cache="public, max-age=300")
+                elif path in REPORT_EXPORT_PATHS:
+                    self._handle_report_export(path, report_args_from_query(self.path))
                 elif site_verification.file_body(path) is not None:
                     # 검색엔진 소유확인용 HTML 파일(환경변수 SITE_VERIFICATION_FILES 로만 열린다).
                     self._send_text(200, site_verification.file_body(path) or "",
@@ -253,6 +276,9 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             usage.record_request(store, "POST", path)
+            if path in REPORT_EXPORT_PATHS:
+                self._handle_report_export(path)
+                return
             if path.rstrip("/") in MCP_PATHS:
                 self._handle_mcp()
                 return
@@ -286,6 +312,50 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
             status = 200 if result.get("ok") is not False else (
                 404 if result.get("error") == "unknown_tool" else 400)
             self._send_json(status, result)
+
+        def _handle_report_export(self, path: str, args: Optional[Dict[str, Any]] = None) -> None:
+            """거래처 전달용 CSV·인쇄용 HTML — 요청 본문은 `/v1/tools/business_report` 와 같다.
+
+            POST(JSON 본문)와 GET(쿼리 문자열)을 모두 받는다. GET 은 웹 화면의 다운로드·
+            인쇄 버튼이 브라우저 기본 동작으로 열기 위해 필요하다.
+            """
+            if args is None:
+                try:
+                    length = int(self.headers.get("Content-Length", "0") or "0")
+                except ValueError:
+                    self._send_json(400, {"ok": False, "error": "invalid_content_length"})
+                    return
+                if length > MAX_BODY:
+                    self._send_json(413, {"ok": False, "error": "payload_too_large"})
+                    return
+                raw = self.rfile.read(length) if length else b"{}"
+                try:
+                    args = json.loads(raw.decode("utf-8") or "{}")
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._send_json(400, {"ok": False, "error": "invalid_json"})
+                    return
+                if not isinstance(args, dict):
+                    self._send_json(400, {"ok": False, "error": "invalid_argument",
+                                          "message": "request_body_must_be_object"})
+                    return
+            fmt = "csv" if path.endswith(".csv") else "html"
+            try:
+                export = report_export(args, catalog, fmt)
+            except Exception:  # noqa: BLE001 - 내부 정보를 노출하지 않는다
+                self._send_json(500, {"ok": False, "error": "internal_error"})
+                return
+            body = export["body"].encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", export["content_type"])
+            self.send_header("Content-Length", str(len(body)))
+            disposition = "inline" if export.get("inline") else "attachment"
+            self.send_header("Content-Disposition",
+                             f'{disposition}; filename="{export["filename"]}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self._common_headers()
+            self.end_headers()
+            self.wfile.write(body)
 
         def _handle_mcp(self) -> None:
             try:

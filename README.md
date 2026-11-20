@@ -9,8 +9,9 @@
 > 사유·누락 정보·선정기준 원문·신청기한·문의처·출처를 같이 돌려줍니다.
 > 로그인 없음, 주민등록번호 없음, 서버 저장 없음.
 
-- 웹 UI: `GET /` — 개인·가구 ↔ 창업·소상공인·기업 전환, 30초 조건 선택
-- JSON API: `POST /v1/tools/{tool}` — 툴 7종
+- 웹 UI: `GET /` — 개인·가구 ↔ 창업·소상공인·기업 ↔ **사업자·대리인 리포트** 3탭, 30초 조건 선택
+- JSON API: `POST /v1/tools/{tool}` — 툴 8종
+- 거래처 전달용: `POST`(또는 `GET`) `/v1/report/export.csv` · `/v1/report/print.html` — 세무사·노무사용 요약 표
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
@@ -107,7 +108,7 @@ PYTHONPATH=src python -m subsidy_kr.sync_gov24 --sources all
 
 ---
 
-## 3. 툴 7종
+## 3. 툴 8종
 
 | 툴 | 입력 | 출력 요점 |
 |---|---|---|
@@ -117,6 +118,7 @@ PYTHONPATH=src python -m subsidy_kr.sync_gov24 --sources all
 | `list_region_subsidies` | `sido`, (`sigungu`), `track` | 지역 제도 + 전국 제도 목록 |
 | `deadline_calendar` | `days`(기본 30), `track`, `sido`/`sigungu`, `keyword` | 마감 임박 캘린더(날짜별) + 날짜 미기재 건수 |
 | `compare_ledgers` | `from_date`, `to_date`, `service_id` | 일자별 스냅샷 비교: 추가·삭제·기간/금액/대상/모집상태 변경 |
+| `business_report` | `industry`, `employees`, `annual_revenue_krw`(또는 `annual_revenue_eok`), `biz_years`, `sido`/`sigungu`, `interest[]` | 세무사·노무사용 **거래처 리포트** — 소상공인/중소기업/고용·노무/정책자금·세제 네 묶음 + 우선순위 + D-7 |
 | `get_service_meta` | — | 카탈로그·두 트랙·판정 등급·자격 코드·기업 조건·스냅샷·개인정보 설정 |
 
 ```bash
@@ -142,6 +144,19 @@ curl -s localhost:8787/v1/tools/compare_ledgers -d '{}' -H 'Content-Type: applic
 ```
 
 ```bash
+# 세무사·노무사용 거래처 리포트 (인천 서해구 음식점 · 상시근로자 3명 · 연매출 2억)
+curl -s localhost:8787/v1/tools/business_report -H 'Content-Type: application/json' -d '{
+  "sido": "인천광역시", "sigungu": "서해구", "industry": "음식숙박",
+  "employees": 3, "annual_revenue_eok": 2, "biz_years": 4
+}'
+
+# 같은 조건을 거래처 전달용 CSV / 인쇄용 요약 뷰로
+curl -s -X POST localhost:8787/v1/report/export.csv -H 'Content-Type: application/json' \
+  -d '{"sido":"인천광역시","sigungu":"서해구","industry":"음식숙박","employees":3,"annual_revenue_eok":2}' -o report.csv
+open "http://localhost:8787/v1/report/print.html?industry=food&employees=3&annual_revenue_eok=2"
+```
+
+```bash
 # MCP (JSON-RPC 2.0)
 curl -s localhost:8787/mcp -H 'Content-Type: application/json' -d '{
   "jsonrpc":"2.0","id":1,"method":"tools/call",
@@ -154,6 +169,34 @@ curl -s localhost:8787/mcp -H 'Content-Type: application/json' -d '{
 `business{status(pre|operating), entity, years, industry}`.
 `situations` 를 **빈 배열로 보내면 "해당 없음"**, 아예 빼면 "모름"으로 판정합니다.
 `business.status` 만 넣어도 대부분 판정됩니다.
+
+---
+
+## 3-1. 사업자·대리인 리포트 (세무·노무)
+
+개인은 "내가 받을 수 있나"를 묻지만, 세무사·노무사·컨설턴트는 **거래처 여러 곳**을 맡기고
+"이 사업장이 지금 신청할 만한 공고"를 표로 정리해 전달합니다. 그래서 웹 UI 에 세 번째 탭과
+`business_report` 툴을 따로 두었습니다.
+
+| 입력 | 판단 |
+|---|---|
+| 업종 | 적용되는 상시근로자·매출 기준(제조·건설·운수 10명 / 그 밖 5명) |
+| 상시근로자 수 | 소상공인 공통 요건 10명 미만 + 업종별 요건 |
+| 연매출(직전 사업연도) | 「중소기업기본법 시행령」 별표 3(2025-09-01 개정) 업종별 기준 |
+| 업력·사업자 상태 | 예비창업자는 규모 판정을 건너뜁니다 |
+
+- **네 묶음 분류** — 소상공인 / 중소기업 / **고용·노무** / **정책자금·세제**. '중소기업'처럼 모든
+  기업 공고에 붙는 대상 표시는 주제로 보지 않습니다. 고용·세제 키워드가 하나라도 걸리면 그쪽을
+  주 분류로 삼아 노무·세무 담당자가 자기 영역을 놓치지 않게 했습니다.
+- **우선순위** — 규모 적합 + 판정 등급 + 마감 D-7 + 업종·지역 일치를 점수로 합쳐
+  `우선 검토 / 검토 / 참고` 세 단계로 표시하고, 7일 이내 마감은 표에서 색으로 강조합니다.
+- **거래처 전달용 산출물** — 공고명·소관기관·지원유형·마감일·D-day·신청 링크가 들어간 CSV(엑셀에서
+  바로 열리도록 UTF-8 BOM)와 인쇄용 요약 뷰(A4, `@media print`). CSV 는 `=`, `+`, `-`, `@` 로
+  시작하는 셀에 따옴표를 붙여 수식 주입을 막습니다.
+- **개인정보 없음** — 상호·대표자·연락처를 받지 않습니다. 파일명도 업종·날짜만 씁니다.
+
+규모 판정은 **추정**입니다. 확정은 소상공인시장진흥공단의 소상공인 확인서·중소기업 확인서로 하며,
+그 문구를 응답의 `scope_limits_ko` 에 함께 넣습니다.
 
 ---
 
@@ -221,16 +264,17 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── store.py           SQLite(스냅샷·익명 카운터)
     │   ├── deadlines.py       신청기한 자유 텍스트 파서
     │   ├── regions.py         시도·시군구 정규화, 소관기관명→지역
-    │   ├── api.py             툴 7종 정의
+    │   ├── api.py             툴 8종 정의
+    │   ├── agent_report.py    사업자·대리인 리포트(규모 판단·분류·CSV/인쇄)
     │   ├── mcp_http.py        JSON-RPC 2.0
     │   ├── mcp_stdio.py       stdio 전송
     │   ├── server.py          HTTP 라우팅
-    │   ├── web_ui.py          인라인 CSS/JS 단일 페이지(두 트랙)
+    │   ├── web_ui.py          인라인 CSS/JS 단일 페이지(3탭)
     │   ├── pseo.py            /s/ 주제·지역 페이지(thin content 규칙)
     │   ├── static_files.py    robots·llms·sitemap·server-card
     │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
     │   └── usage.py           익명 일별 카운터
-    └── tests/                 unittest 23개 파일 · 321건
+    └── tests/                 unittest 24개 파일 · 371건
 ```
 
 ### 5-1. 응답 시간과 캐시
@@ -325,7 +369,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.2.3` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.3.0` 태그로 게시합니다.
 
 ## 9. 라이선스
 

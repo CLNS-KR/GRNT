@@ -14,12 +14,12 @@ from subsidy_kr.store import Store  # noqa: E402
 
 
 class ToolRegistryTest(unittest.TestCase):
-    def test_seven_tools_with_schemas(self):
-        self.assertEqual(len(api.TOOL_DEFS), 7)
+    def test_tool_registry_with_schemas(self):
+        self.assertEqual(len(api.TOOL_DEFS), 8)
         names = [definition["name"] for definition in api.TOOL_DEFS]
         self.assertEqual(names, ["search_subsidies", "check_eligibility", "get_subsidy_detail",
                                  "list_region_subsidies", "deadline_calendar",
-                                 "compare_ledgers", "get_service_meta"])
+                                 "compare_ledgers", "business_report", "get_service_meta"])
         for definition in api.TOOL_DEFS:
             self.assertTrue(definition["title_ko"])
             self.assertTrue(definition["description_ko"])
@@ -27,7 +27,7 @@ class ToolRegistryTest(unittest.TestCase):
 
     def test_mcp_tools_have_annotations(self):
         tools = api.mcp_tools()
-        self.assertEqual(len(tools), 7)
+        self.assertEqual(len(tools), 8)
         for tool in tools:
             self.assertTrue(tool["annotations"]["readOnlyHint"])
             self.assertIn("inputSchema", tool)
@@ -35,7 +35,7 @@ class ToolRegistryTest(unittest.TestCase):
     def test_manifest(self):
         manifest = api.mcp_manifest()
         self.assertEqual(manifest["name"], "grnt")
-        self.assertEqual(len(manifest["tools"]), 7)
+        self.assertEqual(len(manifest["tools"]), 8)
 
 
 class ToolCallTest(unittest.TestCase):

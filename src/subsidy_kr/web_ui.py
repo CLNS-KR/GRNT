@@ -147,6 +147,25 @@ details p{margin:6px 0 0}
 .tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;
   background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);margin-left:6px}
 .origin{font-size:11.5px;color:var(--ink-soft);margin-top:8px}
+.report-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+.report-table th,.report-table td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+.report-table th{background:var(--bg);font-weight:700;white-space:nowrap;font-size:11.5px}
+.report-table td.nowrap{white-space:nowrap}
+.report-table td.soon{color:var(--warn);font-weight:800;background:var(--warn-soft)}
+.report-table a{font-weight:700}
+.report-sec{margin-top:18px}
+.report-sec h3{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 4px}
+.report-sec h3 small{font-weight:500;color:var(--ink-soft);font-size:11.5px}
+.report-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.report-actions a,.report-actions button{font:inherit;font-size:13px;font-weight:700;padding:9px 14px;
+  border-radius:10px;border:1px solid var(--line);background:var(--brand-soft);color:var(--brand-ink);
+  text-decoration:none;cursor:pointer;min-height:40px;display:inline-flex;align-items:center}
+.report-sum{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 4px}
+.report-sum span{font-size:12.5px;font-weight:700;padding:5px 11px;border-radius:999px;
+  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft)}
+.report-size{margin:12px 0 0;padding:11px 13px;border-radius:11px;background:var(--info-soft);color:var(--info);font-size:13px}
+.report-size ul{margin:6px 0 0;padding-left:18px}
+.report-size li{margin:2px 0}
 """
 
 
@@ -192,7 +211,33 @@ def _track_switch() -> str:
         '<span>개인·가구<small>정부·지자체 복지·주거·청년 지원금</small></span></label>'
         '<label><input type="radio" name="track" value="business">'
         '<span>창업·소상공인·기업<small>예비창업·업력·소상공인·중소기업 지원사업</small></span></label>'
+        '<label><input type="radio" name="track" value="agent">'
+        '<span>사업자·대리인 리포트<small>세무·노무 담당자용 — 거래처 전달 표(CSV·인쇄)</small></span></label>'
         '</div>'
+    )
+
+
+def _agent_industry_options() -> str:
+    """대표인 리포트용 업종 선택지(작업 중인 별칭 기준)."""
+    order = ("manufacturing", "retail", "food", "ict", "service", "construction",
+             "logistics", "agri", "education", "health", "culture", "energy", "finance", "etc")
+    options = [f'<option value="{slug}">{programs.INDUSTRY_LABELS[slug]}</option>'
+               for slug in order if slug in programs.INDUSTRY_LABELS]
+    options.append('<option value="창업">예비창업자(업종 미정)</option>')
+    return "".join(options)
+
+
+def _interest_checks() -> str:
+    labels = {
+        "small_business": "소상공인",
+        "sme": "중소기업",
+        "labor": "고용·노무",
+        "finance_tax": "정책자금·세제",
+    }
+    return "".join(
+        f'<label><input type="checkbox" name="interest" value="{key}">'
+        f'<span>{label}</span></label>'
+        for key, label in labels.items()
     )
 
 
@@ -244,6 +289,8 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         track_switch=_track_switch(),
         entity_options=_entity_options(),
         industry_options=_industry_options(),
+        agent_industry_options=_agent_industry_options(),
+        interest_checks=_interest_checks(),
         notice=notice,
         count=count,
         generated=generated,
@@ -357,6 +404,54 @@ PAGE_TEMPLATE = """<!doctype html>
           </label>
         </div>
 
+        <div class="grid" id="agent-fields" hidden>
+          <label class="field">
+            <span class="lab">업종</span>
+            <select id="agent_industry">
+              <option value="">선택 안 함</option>
+              {agent_industry_options}
+            </select>
+            <span class="hint">업종에 따라 적용되는 근로자·매출 기준이 달라집니다.</span>
+          </label>
+          <label class="field">
+            <span class="lab">상시근로자 수</span>
+            <input type="number" id="agent_employees" inputmode="numeric" min="0" max="100000"
+                   step="1" placeholder="예: 3">
+            <span class="hint">대표자 제외 · 월 60시간 미만 제외 · 60시간 이상 단시간은 0.5명</span>
+          </label>
+          <label class="field">
+            <span class="lab">연매출 <span class="opt">억 원</span></span>
+            <input type="number" id="agent_revenue_eok" inputmode="decimal" min="0" step="0.1"
+                   placeholder="예: 2">
+            <span class="hint">직전 사업연도 매출. 모르면 비워 두세요.</span>
+          </label>
+          <label class="field">
+            <span class="lab">업력 <span class="opt">년</span></span>
+            <input type="number" id="agent_years" inputmode="numeric" min="0" max="60"
+                   step="1" placeholder="예: 4">
+          </label>
+          <label class="field">
+            <span class="lab">기업 형태</span>
+            <select id="agent_entity">
+              <option value="">자동(규모 추정으로 결정)</option>
+              {entity_options}
+            </select>
+          </label>
+          <label class="field">
+            <span class="lab">사업자 상태</span>
+            <select id="agent_status">
+              <option value="operating">사업자등록 후 운영 중</option>
+              <option value="pre">예비창업자(사업자등록 전)</option>
+            </select>
+          </label>
+          <div class="field full">
+            <span class="lab">볼 묶음 <span class="opt">선택 · 비우면 네 묶음 전부</span></span>
+            <div class="chips" id="interest-chips">{interest_checks}</div>
+            <span class="hint">세무 담당이면 <strong>정책자금·세제</strong>, 노무 담당이면
+            <strong>고용·노무</strong>만 켜도 됩니다.</span>
+          </div>
+        </div>
+
         <div class="grid" id="biz-fields" hidden>
           <label class="field">
             <span class="lab">창업 상태</span>
@@ -418,6 +513,16 @@ PAGE_TEMPLATE = """<!doctype html>
       </form>
     </section>
 
+    <section class="card" id="report-card" hidden>
+      <h2>거래처 리포트</h2>
+      <p class="sub" id="report-sub"></p>
+      <div class="report-actions" id="report-actions"></div>
+      <div class="report-sum" id="report-sum"></div>
+      <div class="report-size" id="report-size" hidden></div>
+      <div id="report-body"></div>
+      <p class="foot" id="report-foot"></p>
+    </section>
+
     <section class="card" id="results-card" hidden>
       <h2>판정 결과</h2>
       <p class="sub" id="results-sub"></p>
@@ -473,9 +578,15 @@ PAGE_TEMPLATE = """<!doctype html>
     return picked ? picked.value : 'personal';
   }}
   function applyTrack(){{
-    var business = currentTrack() === 'business';
-    document.getElementById('personal-fields').hidden = business;
-    document.getElementById('biz-fields').hidden = !business;
+    var track = currentTrack();
+    document.getElementById('personal-fields').hidden = track !== 'personal';
+    document.getElementById('biz-fields').hidden = track !== 'business';
+    document.getElementById('agent-fields').hidden = track !== 'agent';
+    var runBtn = document.getElementById('run');
+    if (runBtn) {{
+      runBtn.textContent = track === 'agent' ? '거래처 리포트 만들기'
+        : (track === 'business' ? '우리 회사 지원사업 확인하기' : '내 지원금 확인하기');
+    }}
   }}
   Array.prototype.slice.call(document.querySelectorAll('input[name=track]'))
     .forEach(function(input){{ input.addEventListener('change', applyTrack); }});
@@ -536,8 +647,8 @@ PAGE_TEMPLATE = """<!doctype html>
     return node;
   }}
 
-  var activeFilter = 'all';
-  var activeKind = 'all';
+  var activeFilter = 'none';
+  var activeKind = 'none';
   var activeField = 'all';
   var lastData = null;
 
@@ -554,12 +665,11 @@ PAGE_TEMPLATE = """<!doctype html>
     // 이전 동적 필터 바 정리
     document.querySelectorAll('.sub-bar-dyn').forEach(function(elNode){{ elNode.remove(); }});
 
-    // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램) 딱 2개
+    // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램) 딱 2개만 먼저 노출
     var grantCnt = allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
     var progCnt = allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
-    if (activeKind !== 'grant' && activeKind !== 'program') {{ activeKind = 'grant'; }}
-    if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'program'; }}
-    if (activeKind === 'program' && progCnt === 0 && grantCnt > 0) {{ activeKind = 'grant'; }}
+    if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'none'; }}
+    if (activeKind === 'program' && progCnt === 0 && grantCnt > 0) {{ activeKind = 'none'; }}
     var kindTabs = [
       ['grant', '지원금·바우처'],
       ['program', '교육·건강·프로그램']
@@ -573,55 +683,106 @@ PAGE_TEMPLATE = """<!doctype html>
       kbtn.style.fontWeight = '600';
       kbtn.textContent = label + ' ' + kindCounts[k] + '건';
       kbtn.addEventListener('click', function(){{
-        activeKind = k;
-        activeField = 'all';
-        activeFilter = 'all';
+        if (activeKind === k) {{
+          activeKind = 'none';
+          activeFilter = 'none';
+          activeField = 'all';
+        }} else {{
+          activeKind = k;
+          activeFilter = 'none';
+          activeField = 'all';
+        }}
         renderResults(lastData);
       }});
       counts.appendChild(kbtn);
     }});
 
-    // 1단 필터 적용
-    var kindRows = allRows.filter(function(r){{
-      return activeKind === 'program'
-        ? r.benefit_kind === 'program'
-        : r.benefit_kind !== 'program';
-    }});
+    // 1단 필터 적용 (미선택 시 전체 목록 표시, 2·3단 필터 바는 숨김)
+    var kindRows = activeKind === 'none'
+      ? allRows
+      : allRows.filter(function(r){{
+          return activeKind === 'program'
+            ? r.benefit_kind === 'program'
+            : r.benefit_kind !== 'program';
+        }});
 
-    var labels = {{
-      all: '전체',
-      eligible_likely: '받을 가능성 높음',
-      check_needed: '조건 확인 필요',
-      insufficient_info: '정보 부족'
-    }};
-    var rowCounts = {{all: kindRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0}};
-    kindRows.forEach(function(r){{
-      var c = r.verdict && r.verdict.code;
-      if (rowCounts[c] !== undefined) {{ rowCounts[c] += 1; }}
-    }});
-    var verdictBar = document.createElement('div');
-    verdictBar.className = 'counts sub-bar-dyn';
-    verdictBar.style.marginTop = '8px';
-    Object.keys(labels).forEach(function(code){{
-      var cnt = code === 'all' ? kindRows.length : (rowCounts[code] || 0);
-      if (code !== 'all' && !cnt) return;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = activeFilter === code ? 'active' : '';
-      btn.textContent = labels[code] + ' ' + cnt + '건';
-      btn.addEventListener('click', function(){{
-        activeFilter = code;
-        activeField = 'all';
-        renderResults(lastData);
+    var verdictRows = kindRows;
+    if (activeKind !== 'none') {{
+      var subBox = document.createElement('div');
+      subBox.className = 'sub-bar-dyn';
+      subBox.style.marginTop = '10px';
+      subBox.style.padding = '10px 12px';
+      subBox.style.background = '#f8f9fb';
+      subBox.style.border = '1px solid #e6e8ee';
+      subBox.style.borderRadius = '10px';
+
+      var labels = {{
+        all: '전체',
+        eligible_likely: '받을 가능성 높음',
+        check_needed: '조건 확인 필요',
+        insufficient_info: '정보 부족'
+      }};
+      var rowCounts = {{all: kindRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0}};
+      kindRows.forEach(function(r){{
+        var c = r.verdict && r.verdict.code;
+        if (rowCounts[c] !== undefined) {{ rowCounts[c] += 1; }}
       }});
-      verdictBar.appendChild(btn);
-    }});
+      var verdictBar = document.createElement('div');
+      verdictBar.className = 'counts';
+      Object.keys(labels).forEach(function(code){{
+        var cnt = code === 'all' ? kindRows.length : (rowCounts[code] || 0);
+        if (code !== 'all' && !cnt) return;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = activeFilter === code ? 'active' : '';
+        btn.textContent = labels[code] + ' ' + cnt + '건';
+        btn.addEventListener('click', function(){{
+          activeFilter = (activeFilter === code) ? 'none' : code;
+          activeField = 'all';
+          renderResults(lastData);
+        }});
+        verdictBar.appendChild(btn);
+      }});
+      subBox.appendChild(verdictBar);
 
-    // 2단(판정)까지 통과한 행 기준으로 3단(분야) 건수 계산
-    var verdictRows = kindRows.filter(function(r){{
-      if (activeFilter === 'all') return true;
-      return r.verdict && r.verdict.code === activeFilter;
-    }});
+      if (activeFilter !== 'none') {{
+        verdictRows = kindRows.filter(function(r){{
+          if (activeFilter === 'all') return true;
+          return r.verdict && r.verdict.code === activeFilter;
+        }});
+      }}
+
+      if (activeFilter !== 'none') {{
+        var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
+        var fieldCounts = {{}};
+        verdictRows.forEach(function(r){{
+          var b = fieldBucket(r);
+          fieldCounts[b] = (fieldCounts[b] || 0) + 1;
+        }});
+        var fieldBar = document.createElement('div');
+        fieldBar.className = 'counts';
+        fieldBar.style.marginTop = '8px';
+        fieldBar.style.paddingTop = '8px';
+        fieldBar.style.borderTop = '1px dashed #dde1ea';
+        var fAllBtn = document.createElement('button');
+        fAllBtn.type = 'button';
+        fAllBtn.className = activeField === 'all' ? 'active' : '';
+        fAllBtn.textContent = '전체 분야 ' + verdictRows.length + '건';
+        fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
+        fieldBar.appendChild(fAllBtn);
+        fieldOrder.forEach(function(fb){{
+          if (!fieldCounts[fb]) return;
+          var fbBtn = document.createElement('button');
+          fbBtn.type = 'button';
+          fbBtn.className = activeField === fb ? 'active' : '';
+          fbBtn.textContent = fb + ' ' + fieldCounts[fb] + '건';
+          fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
+          fieldBar.appendChild(fbBtn);
+        }});
+        subBox.appendChild(fieldBar);
+      }}
+      counts.parentNode.insertBefore(subBox, counts.nextSibling);
+    }}
 
     function fieldBucket(row){{
       var fl = String(row.field_label || row.field || '기타').trim();
@@ -634,32 +795,6 @@ PAGE_TEMPLATE = """<!doctype html>
       if (/생활|복지/.test(fl)) return '생활·복지';
       return '행정·기타';
     }}
-    var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
-    var fieldCounts = {{}};
-    verdictRows.forEach(function(r){{
-      var b = fieldBucket(r);
-      fieldCounts[b] = (fieldCounts[b] || 0) + 1;
-    }});
-    var fieldBar = document.createElement('div');
-    fieldBar.className = 'counts sub-bar-dyn';
-    fieldBar.style.marginTop = '6px';
-    var fAllBtn = document.createElement('button');
-    fAllBtn.type = 'button';
-    fAllBtn.className = activeField === 'all' ? 'active' : '';
-    fAllBtn.textContent = '전체 분야 ' + verdictRows.length + '건';
-    fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
-    fieldBar.appendChild(fAllBtn);
-    fieldOrder.forEach(function(fb){{
-      if (!fieldCounts[fb]) return;
-      var fbBtn = document.createElement('button');
-      fbBtn.type = 'button';
-      fbBtn.className = activeField === fb ? 'active' : '';
-      fbBtn.textContent = fb + ' ' + fieldCounts[fb] + '건';
-      fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
-      fieldBar.appendChild(fbBtn);
-    }});
-    counts.parentNode.insertBefore(verdictBar, counts.nextSibling);
-    counts.parentNode.insertBefore(fieldBar, verdictBar.nextSibling);
 
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
     var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
@@ -837,10 +972,209 @@ PAGE_TEMPLATE = """<!doctype html>
       : (result.disclaimer_ko || '');
   }}
 
+  var lastReportPayload = null;
+
+  function numberOrNull(id){{
+    var raw = document.getElementById(id).value;
+    if (raw === '' || raw === null) return null;
+    var value = parseFloat(raw);
+    return isNaN(value) ? null : value;
+  }}
+
+  function reportPayload(){{
+    var payload = {{limit: 60}};
+    if (sido.value) payload.sido = sido.value;
+    if (sigungu.value) payload.sigungu = sigungu.value;
+    var industry = document.getElementById('agent_industry').value;
+    if (industry) payload.industry = industry;
+    var employees = numberOrNull('agent_employees');
+    if (employees !== null) payload.employees = employees;
+    var revenue = numberOrNull('agent_revenue_eok');
+    if (revenue !== null) payload.annual_revenue_eok = revenue;
+    var years = numberOrNull('agent_years');
+    if (years !== null) payload.biz_years = years;
+    var entity = document.getElementById('agent_entity').value;
+    if (entity) payload.biz_entity = entity;
+    var statusValue = document.getElementById('agent_status').value;
+    if (statusValue) payload.biz_status = statusValue;
+    var interest = Array.prototype.slice
+      .call(document.querySelectorAll('input[name=interest]:checked'))
+      .map(function(input){{ return input.value; }});
+    if (interest.length) payload.interest = interest;
+    var kw = document.getElementById('keyword');
+    if (kw && kw.value.trim()) payload.keyword = kw.value.trim();
+    var closed = document.getElementById('include_closed');
+    if (closed && closed.checked) payload.include_closed = true;
+    return payload;
+  }}
+
+  function queryString(payload){{
+    var params = [];
+    Object.keys(payload || {{}}).forEach(function(key){{
+      var value = payload[key];
+      if (value === null || value === undefined || value === '') return;
+      var list = Array.isArray(value) ? value : [value];
+      list.forEach(function(item){{
+        params.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(item)));
+      }});
+    }});
+    return params.join('&');
+  }}
+
+  function reportTable(rows){{
+    var table = el('table', 'report-table');
+    var head = el('thead');
+    var headRow = el('tr');
+    ['공고명', '소관기관', '지원유형', '마감일', 'D-day', '판정', '신청'].forEach(function(label){{
+      headRow.appendChild(el('th', null, label));
+    }});
+    head.appendChild(headRow);
+    table.appendChild(head);
+    var body = el('tbody');
+    rows.forEach(function(row){{
+      var tr = el('tr');
+      tr.appendChild(el('td', null, row.name || ''));
+      tr.appendChild(el('td', null, row.agency || ''));
+      tr.appendChild(el('td', null, row.support_type || ''));
+      tr.appendChild(el('td', 'nowrap', row.deadline_date || row.deadline_text || '미기재'));
+      tr.appendChild(el('td', 'nowrap' + (row.closing_soon ? ' soon' : ''), row.d_day || ''));
+      tr.appendChild(el('td', 'nowrap', (row.verdict && row.verdict.label_ko) || ''));
+      var linkCell = el('td', 'nowrap');
+      if (row.link) {{
+        var anchor = el('a', null, '신청');
+        anchor.href = row.link;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener noreferrer';
+        linkCell.appendChild(anchor);
+      }} else {{
+        linkCell.textContent = '—';
+      }}
+      tr.appendChild(linkCell);
+      body.appendChild(tr);
+    }});
+    table.appendChild(body);
+    return table;
+  }}
+
+  function renderReport(data){{
+    var result = data.result || {{}};
+    var client = result.client || {{}};
+    var summary = result.summary || {{}};
+    var card = document.getElementById('report-card');
+    var box = document.getElementById('report-body');
+    var actions = document.getElementById('report-actions');
+    var sum = document.getElementById('report-sum');
+    box.innerHTML = ''; actions.innerHTML = ''; sum.innerHTML = '';
+    document.getElementById('results-card').hidden = true;
+    card.hidden = false;
+
+    var employees = (client.employees === null || client.employees === undefined)
+      ? '미입력' : client.employees + '명';
+    var years = (client.biz_years === null || client.biz_years === undefined)
+      ? '미입력' : String(Number(client.biz_years)) + '년';
+    document.getElementById('report-sub').textContent =
+      (client.industry_label || '업종 미지정') + ' · 상시근로자 ' + employees +
+      ' · 연매출 ' + (client.annual_revenue_label || '미입력') +
+      ' · 업력 ' + years + ' · ' + (client.region_label || '전국') +
+      ' · ' + (result.scanned || 0) + '건을 대조했습니다.';
+
+    var query = queryString(lastReportPayload);
+    var csvLink = el('a', null, 'CSV 다운로드');
+    csvLink.href = '/v1/report/export.csv?' + query;
+    csvLink.setAttribute('download', '');
+    actions.appendChild(csvLink);
+    var printLink = el('a', null, '인쇄용 요약 뷰');
+    printLink.href = '/v1/report/print.html?' + query;
+    printLink.target = '_blank';
+    printLink.rel = 'noopener noreferrer';
+    actions.appendChild(printLink);
+
+    [['후보', summary.total || 0], ['우선 검토', summary.high_priority || 0],
+     ['마감임박 D-7', summary.d7_count || 0]].forEach(function(pair){{
+      sum.appendChild(el('span', null, pair[0] + ' ' + pair[1] + '건'));
+    }});
+    (result.sections || []).forEach(function(section){{
+      sum.appendChild(el('span', null, section.category_label + ' ' + section.count + '건'));
+    }});
+
+    var sizeBox = document.getElementById('report-size');
+    var size = result.size_estimate || {{}};
+    sizeBox.innerHTML = '';
+    if (size.summary_ko) {{
+      sizeBox.hidden = false;
+      sizeBox.appendChild(el('strong', null, '규모 판단 — ' + size.summary_ko));
+      var noteList = el('ul');
+      (size.notes_ko || []).forEach(function(note){{
+        noteList.appendChild(el('li', null, note));
+      }});
+      if (noteList.childNodes.length) sizeBox.appendChild(noteList);
+    }} else {{
+      sizeBox.hidden = true;
+    }}
+
+    if ((result.d7 || []).length) {{
+      var d7Sec = el('div', 'report-sec');
+      var d7Head = el('h3', null, '마감 임박(D-7)');
+      d7Head.appendChild(el('small', null, '이번 주에 신청을 끝내야 하는 공고'));
+      d7Sec.appendChild(d7Head);
+      d7Sec.appendChild(reportTable(result.d7));
+      box.appendChild(d7Sec);
+    }}
+
+    (result.sections || []).forEach(function(section){{
+      var sec = el('div', 'report-sec');
+      var title = el('h3', null, section.category_label || '');
+      title.appendChild(el('small', null,
+        (section.duty_ko || '') + ' · ' + (section.count || 0) + '건'));
+      sec.appendChild(title);
+      sec.appendChild(reportTable(section.rows || []));
+      box.appendChild(sec);
+    }});
+
+    if (!(result.sections || []).length) {{
+      box.appendChild(el('div', 'empty',
+        '조건에 맞는 공고가 나오지 않았습니다. 업종·규모·지역을 바꿔 다시 시도해 보세요.'));
+    }}
+
+    var footText = result.disclaimer_ko || '';
+    if ((result.notes_ko || []).length) {{
+      footText += ' ' + result.notes_ko.join(' ');
+    }}
+    document.getElementById('report-foot').textContent = footText;
+  }}
+
+  function runReport(){{
+    var button = document.getElementById('run');
+    button.disabled = true;
+    status.textContent = '거래처 리포트를 만드는 중…';
+    lastReportPayload = reportPayload();
+    fetch('/v1/tools/business_report', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(lastReportPayload)
+    }}).then(function(response){{
+      if (!response.ok) {{ throw new Error('HTTP ' + response.status); }}
+      return response.json();
+    }}).then(function(data){{
+      if (!data.ok) {{ throw new Error(data.message || data.error || 'error'); }}
+      status.textContent = '';
+      renderReport(data);
+      document.getElementById('report-card').scrollIntoView({{behavior:'smooth', block:'start'}});
+    }}).catch(function(error){{
+      status.textContent = '리포트를 만들지 못했습니다(' + error.message + '). 잠시 뒤 다시 시도해 주세요.';
+    }}).finally(function(){{
+      button.disabled = false;
+    }});
+  }}
+
   var form = document.getElementById('check');
   var status = document.getElementById('status');
   form.addEventListener('submit', function(event){{
     event.preventDefault();
+    if (currentTrack() === 'agent') {{
+      runReport();
+      return;
+    }}
     var button = document.getElementById('run');
     button.disabled = true;
     status.textContent = '판정 중…';
@@ -855,8 +1189,8 @@ PAGE_TEMPLATE = """<!doctype html>
     if (kwEl && kwEl.value.trim()) {{
       payload.keyword = kwEl.value.trim();
     }}
-    activeFilter = 'all';
-    activeKind = 'grant';
+    activeFilter = 'none';
+    activeKind = 'none';
     activeField = 'all';
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
@@ -888,6 +1222,16 @@ PAGE_TEMPLATE = """<!doctype html>
   }});
 
   document.getElementById('fill-demo').addEventListener('click', function(){{
+    if (currentTrack() === 'agent') {{
+      sido.value = '인천광역시'; resetSigungu(); sigungu.value = '서해구';
+      document.getElementById('agent_industry').value = 'food';
+      document.getElementById('agent_employees').value = '3';
+      document.getElementById('agent_revenue_eok').value = '2';
+      document.getElementById('agent_years').value = '4';
+      document.getElementById('agent_entity').value = '';
+      document.getElementById('agent_status').value = 'operating';
+      return;
+    }}
     document.getElementById('birth_year').value = '1992';
     document.querySelector('input[name=sex][value=male]').checked = true;
     sido.value = '인천광역시'; resetSigungu(); sigungu.value = '서해구';

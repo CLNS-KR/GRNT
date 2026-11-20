@@ -21,7 +21,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from . import conditions, engine, local_portals, models, programs, regions, snapshots, usage
+from . import (agent_report, conditions, engine, local_portals, models, programs, regions,
+               snapshots, usage)
 from .catalog import Catalog
 
 SCHEMA_VERSION = "1.1"
@@ -503,6 +504,43 @@ def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = N
     return _envelope("get_service_meta", payload, catalog)
 
 
+def tool_business_report(args: Dict[str, Any], catalog: Catalog, store: Any = None) -> Dict[str, Any]:
+    """사업자·대리인 리포트(세무사·노무사·소상공인 담당자용)."""
+    report = agent_report.build_report(catalog, args)
+    payload: Dict[str, Any] = dict(report)
+    payload["summary_ko"] = agent_report.to_markdown(report)
+    payload["export"] = {
+        "method": "POST (아래 URL 에 같은 요청 본문을 보냅니다)",
+        "csv_url": "/v1/report/export.csv",
+        "print_url": "/v1/report/print.html",
+        "columns_csv": [label for label, _ in agent_report.CSV_COLUMNS],
+    }
+    payload["scope_limits_ko"] = SCOPE_LIMITS_KO + [
+        "규모 판정(소상공인·소기업)은 입력값 기준 추정이며, 확정은 소상공인시장진흥공단 "
+        "확인서·중소기업 확인서로 합니다.",
+    ]
+    return _envelope("business_report", payload, catalog)
+
+
+def report_export(arguments: Optional[Dict[str, Any]], catalog: Catalog,
+                  fmt: str = "csv") -> Dict[str, Any]:
+    """리포트 CSV·인쇄용 HTML — 웹 화면과 API 가 같은 계산을 쓴다."""
+    report = agent_report.build_report(catalog, arguments or {})
+    if fmt == "csv":
+        return {
+            "body": agent_report.to_csv(report),
+            "content_type": "text/csv; charset=utf-8",
+            "filename": agent_report.filename_for(report, "csv"),
+            "inline": False,
+        }
+    return {
+        "body": agent_report.to_print_html(report),
+        "content_type": "text/html; charset=utf-8",
+        "filename": agent_report.filename_for(report, "html"),
+        "inline": True,
+    }
+
+
 def data_dir_hint() -> Optional[str]:
     """스냅샷 디렉터리 계산용(카탈로그 경로와 같은 기본 디렉터리를 쓴다)."""
     from .catalog import data_dir_from_env
@@ -687,6 +725,53 @@ TOOL_DEFS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "business_report",
+        "title_ko": "사업자·대리인 리포트(세무·노무)",
+        "description_ko": (
+            "세무사·노무사·소상공인 담당자가 **거래처 1곳**의 신청 후보를 한 번에 뽑는 리포트. "
+            "업종·상시근로자 수·연매출·업력·소재지를 넣으면 소상공인/소기업 기준 해당 여부를 "
+            "추정하고, 후보를 소상공인·중소기업·고용·노무·정책자금·세제 네 묶음으로 나눠 "
+            "우선순위와 마감 D-day(7일 이내 강조)를 붙여 줍니다. 같은 요청을 "
+            "`/v1/report/export.csv`·`/v1/report/print.html` 로 보내면 거래처 전달용 CSV·"
+            "인쇄용 요약 뷰를 받습니다. 개인 식별 정보(상호·대표자·연락처)는 받지 않습니다."
+        ),
+        "handler": tool_business_report,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "sido": {"type": "string", "description": "소재지 시·도 (예: 인천광역시)"},
+                "sigungu": {"type": "string", "description": "시·군·구 (예: 서해구)"},
+                "industry": {
+                    "type": "string",
+                    "description": ("업종 — 코드 또는 한글 별칭: manufacturing(제조), retail(도소매), "
+                                   "food(음식숙박), ict(IT·정보통신), service(서비스), "
+                                   "construction(건설), logistics(물류), agri(농림어업), education(교육), "
+                                   "health(보건의료), culture(문화관광), energy(환경에너지), "
+                                   "finance(금융), etc(기타), 창업(예비창업자)"),
+                },
+                "employees": {"type": "integer", "minimum": 0, "maximum": 100000,
+                              "description": "상시근로자 수(대표자 제외, 월 60시간 미만 제외, 60시간 이상 단시간은 0.5명)"},
+                "annual_revenue_krw": {"type": "integer", "minimum": 0,
+                                       "description": "직전 사업연도 연매출(원)"},
+                "annual_revenue_eok": {"type": "number", "minimum": 0,
+                                       "description": "연매출(억 원) — 원 단위 대신 쓸 수 있음"},
+                "biz_years": {"type": "number", "minimum": 0, "maximum": 60,
+                              "description": "업력(년)"},
+                "biz_status": {"type": "string", "enum": ["pre", "operating"],
+                               "description": "pre(사업자등록 전) | operating(운영 중, 기본값)"},
+                "biz_entity": {"type": "string", "enum": programs.BUSINESS_ENTITIES,
+                               "description": "기업 형태(비우면 규모 추정으로 정합니다)"},
+                "interest": {"type": "array", "items": {"type": "string",
+                                                            "enum": agent_report.CATEGORY_ORDER},
+                             "description": "보고 싶은 묶음만 고르기(기본: 네 묶음 전부)"},
+                "keyword": {"type": "string", "description": "공고명 키워드"},
+                "include_closed": {"type": "boolean", "default": False},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 60},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "get_service_meta",
         "title_ko": "서비스·데이터 상태",
         "description_ko": (
@@ -761,6 +846,9 @@ def text_summary(result: Dict[str, Any]) -> str:
         if data.get("without_date_count"):
             lines.append(f"날짜 미기재 {data['without_date_count']}건은 캘린더에서 제외했습니다.")
         return "\n".join(lines)
+    if "summary_ko" in data and ("sections" in data or "export" in data):
+        # business_report — 묶음별 요약이 이미 사람이 읽는 문장이다.
+        return str(data.get("summary_ko") or "")
     if "summary_ko" in data and ("added" in data or "reason_ko" in data):
         return str(data.get("summary_ko") or data.get("reason_ko") or "")
     if data.get("reason_ko") and not data.get("results"):

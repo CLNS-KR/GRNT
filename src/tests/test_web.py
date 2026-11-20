@@ -157,7 +157,7 @@ class StaticFilesTest(unittest.TestCase):
         card = static_files.server_card()
         self.assertEqual(card["serverInfo"]["name"], "grnt")
         self.assertFalse(card["authentication"]["required"])
-        self.assertEqual(len(card["tools"]), 7)
+        self.assertEqual(len(card["tools"]), 8)
         self.assertEqual(card["transport"]["type"], "streamable-http")
         self.assertIn("stdio", card["transports"])
 

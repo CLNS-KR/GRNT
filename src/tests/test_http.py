@@ -86,7 +86,7 @@ class HttpTest(unittest.TestCase):
         _, llms, _ = self._get("/llms.txt")
         self.assertIn("search_subsidies", llms)
         _, card, _ = self._get("/.well-known/mcp/server-card.json")
-        self.assertEqual(len(json.loads(card)["tools"]), 7)
+        self.assertEqual(len(json.loads(card)["tools"]), 8)
 
     def test_pseo_routes(self):
         status, body, _ = self._get("/s/")
@@ -99,7 +99,7 @@ class HttpTest(unittest.TestCase):
 
     def test_manifest_and_meta(self):
         _, body, _ = self._get("/v1/mcp")
-        self.assertEqual(len(json.loads(body)["tools"]), 7)
+        self.assertEqual(len(json.loads(body)["tools"]), 8)
         _, body, _ = self._get("/v1/meta")
         meta = json.loads(body)["result"]
         self.assertEqual(len(meta["verdicts"]), 4)
