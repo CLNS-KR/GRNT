@@ -40,12 +40,12 @@ jobs:
           status, _ = get("/healthz")
           assert status == 200
           status, body = get("/v1/mcp")
-          assert len(json.loads(body)["tools"]) == 7
+          assert len(json.loads(body)["tools"]) == 8
           request = urllib.request.Request(
               "http://127.0.0.1:8787/mcp",
               data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode(),
               headers={"Content-Type": "application/json"}, method="POST")
           with urllib.request.urlopen(request, timeout=5) as response:
-              assert len(json.loads(response.read())["result"]["tools"]) == 7
+              assert len(json.loads(response.read())["result"]["tools"]) == 8
           print("smoke ok")
           PY
