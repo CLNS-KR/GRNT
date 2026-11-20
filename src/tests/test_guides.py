@@ -94,6 +94,69 @@ class GuidesDataTest(unittest.TestCase):
         self.assertEqual(guides.by_slug("/cheongnyeon-wolse/")["slug"], "cheongnyeon-wolse")
 
 
+class LongTailGuidesTest(unittest.TestCase):
+    """고검색 생활·육아·연말정산·소상공인 롱테일 질문 15종."""
+
+    LONG_TAIL = (
+        "bumo-yugahyu-jik-6-6", "sinsaenga-teukrye-daechul", "sanhujori-bi",
+        "nanim-sisul-bi", "cheongnyeon-doyak-vs-naeil", "wolse-seaeckgongje-jungbok",
+        "sosanggongin-jeongi-baedal-imdae", "huimang-ritun-package",
+        "chulsan-gagu-enerji-gyeonggam", "silup-geupyeo-alba",
+        "kpass-vs-gihaeng-donghaeng", "energy-baucher-gyejeol", "boreyuk-ryo-vs-uhakbi",
+        "durunuri-boheomryo", "gukga-janghakgeum-bunwi",
+    )
+
+    def setUp(self):
+        self.catalog = sample_catalog()
+
+    def test_total_is_at_least_fifty_one(self):
+        self.assertGreaterEqual(guides.GUIDE_COUNT, 51)
+        self.assertEqual(guides.GUIDE_COUNT, len(guides.GUIDES))
+
+    def test_fifteen_new_guides_exist(self):
+        self.assertEqual(len(self.LONG_TAIL), 15)
+        for slug in self.LONG_TAIL:
+            guide = guides.by_slug(slug)
+            self.assertIsNotNone(guide, slug)
+            self.assertGreaterEqual(len(guide["conditions"]), 4, slug)
+            self.assertGreaterEqual(len(guide["pitfalls"]), 2, slug)
+            self.assertTrue(guide["question"].endswith("?"), slug)
+
+    def test_briefed_question_areas_are_covered(self):
+        text = " ".join(f"{g['slug']} {g['question']} {g['topic']} {g['one_line']}"
+                        for g in guides.GUIDES)
+        for needle in ("부모육아휴직", "신생아 특례", "디딤돌", "산후조리", "난임",
+                       "청년도약", "청년내일저축", "세액공제", "배달비", "임대료",
+                       "희망리턴", "도시가스", "실업급여", "기후동행카드", "에너지바우처",
+                       "유아학비", "두루누리", "국가장학금"):
+            self.assertIn(needle, text, needle)
+
+    def test_long_tail_pages_render_with_faq_and_no_fixed_amounts(self):
+        for slug in self.LONG_TAIL:
+            page = guides.render_item(slug, self.catalog)
+            self.assertIsNotNone(page, slug)
+            types = [block.get("@type") for block in json_ld_blocks(page)]
+            self.assertIn("FAQPage", types, slug)
+            self.assertIn("BreadcrumbList", types, slug)
+            self.assertIn("지금 열려 있는 관련 공고", page, slug)
+            # 금액·비율은 공고로 바뀌므로 페이지에 숫자 금액을 고정하지 않는다.
+            self.assertIsNone(re.search(r"\d[\d,]*\s*만?원", page), slug)
+
+    def test_long_tail_guides_reach_sitemap_and_llms(self):
+        xml = static_files.sitemap_xml(self.catalog, base="https://example.test")
+        text = static_files.llms_txt(self.catalog, base="https://example.test")
+        for slug in self.LONG_TAIL:
+            self.assertIn(f"<loc>https://example.test/guides/{slug}</loc>", xml)
+            self.assertIn(f"https://example.test/guides/{slug}", text)
+        self.assertIn(f"자주 묻는 지원금 질문 {guides.GUIDE_COUNT}개", text)
+
+    def test_index_and_home_show_new_count(self):
+        html = guides.render_index(self.catalog)
+        self.assertIn(f"자주 묻는 지원금 질문 {guides.GUIDE_COUNT}개", html)
+        home = web_ui.render_page(self.catalog.meta)
+        self.assertIn(f"가이드 {guides.GUIDE_COUNT}개 전체 보기", home)
+
+
 class GuidesRenderTest(unittest.TestCase):
     def setUp(self):
         self.catalog = sample_catalog()

@@ -15,7 +15,7 @@
 - 거래처 일괄(익명): `POST /v1/batch-match` — 세무·노무사무소 거래처 50~300곳 CSV → 거래처별 3~5건 + 1페이지 요약 HTML·CSV
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
-- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 36개(FAQPage JSON-LD)
+- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 51개(FAQPage JSON-LD)
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
   동기화 없이 바로 12,429건 실데이터로 뜹니다. 내장 샘플(개인 20 + 창업·기업 12)은 둘 다 없을 때의 오프라인 대체입니다.
@@ -250,7 +250,7 @@ CSV로 정리합니다. `POST /v1/batch-match`, `batch_match_clients` 툴, 웹 U
 
 사람들은 ChatGPT·Perplexity·네이버에 "청년 월세 지원 조건"처럼 **질문**으로 묻습니다. 그때
 인용되려면 질문 하나에 답 하나가 있는 페이지와, 기계가 읽을 구조화 데이터가 함께 있어야 합니다.
-`/guides/` 아래 36개 페이지가 그 역할을 합니다.
+`/guides/` 아래 51개 페이지가 그 역할을 합니다(기본 36개 + 2026-11 생활·육아·연말정산·소상공인 롱테일 15개).
 
 | 구성 | 내용 |
 |---|---|
@@ -341,11 +341,11 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── server.py          HTTP 라우팅
     │   ├── web_ui.py          인라인 CSS/JS 단일 페이지(3탭)
     │   ├── pseo.py            /s/ 주제·지역 페이지(thin content 규칙)
-    │   ├── guides.py          /guides/ 질문형 가이드 36개(FAQPage·실시간 공고 연결)
+    │   ├── guides.py          /guides/ 질문형 가이드 51개(FAQPage·실시간 공고 연결)
     │   ├── static_files.py    robots·llms·sitemap·server-card
     │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
     │   └── usage.py           익명 일별 카운터
-    └── tests/                 unittest 28개 파일 · 458건
+    └── tests/                 unittest 28개 파일 · 482건
 ```
 
 ### 5-1. 응답 시간과 캐시

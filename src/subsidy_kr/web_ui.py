@@ -25,6 +25,7 @@ SERVICE_SUBTITLE_EN = "KOREA GRANT & SUBSIDY INTELLIGENCE"
 BASE_CSS = """
 :root{
   --bg:#f5f7fb; --card:#ffffff; --ink:#12161f; --ink-soft:#525c6d; --line:#dde3ec;
+  --surface-2:#f8f9fb; --surface-3:#eef1f6; --on-brand:#ffffff;
   --brand:#1c5bd8; --brand-soft:#e8effc; --brand-ink:#12327a;
   --ok:#0d7a4a; --ok-soft:#e2f5ea; --warn:#8a5300; --warn-soft:#fdf0d8;
   --info:#1e5d91; --info-soft:#e6f0f9; --danger:#9c2b26; --danger-soft:#fbe9e7;
@@ -32,6 +33,7 @@ BASE_CSS = """
 }
 @media (prefers-color-scheme: dark){
   :root{--bg:#0d1117; --card:#161b22; --ink:#e9eef6; --ink-soft:#a9b3c3; --line:#293240;
+    --surface-2:#1b2230; --surface-3:#222b39; --on-brand:#0b1220;
     --brand:#7fa6ff; --brand-soft:#18243d; --brand-ink:#cfe0ff;
     --ok:#5fd39a; --ok-soft:#12291f; --warn:#f0bb63; --warn-soft:#2a2113;
     --info:#8ab8e8; --info-soft:#132436; --danger:#f0998f; --danger-soft:#2c1615;}
@@ -46,7 +48,7 @@ a{color:var(--brand);text-underline-offset:2px}
 header.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
   padding:22px 0 16px;border-bottom:1px solid var(--line)}
 .brand{display:flex;gap:12px;align-items:center;min-width:0}
-.mark{width:40px;height:40px;border-radius:12px;background:var(--brand);color:#fff;display:flex;
+.mark{width:40px;height:40px;border-radius:12px;background:var(--brand);color:var(--on-brand);display:flex;
   align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:0 0 auto}
 .brand h1{margin:0;font-size:18px;letter-spacing:-.2px}
 .brand p{margin:2px 0 0;font-size:12.5px;color:var(--ink-soft)}
@@ -88,7 +90,7 @@ input:focus,select:focus{outline:2px solid var(--brand);outline-offset:1px;borde
 .chips input:checked+span{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-ink)}
 .chips input:focus-visible+span{outline:2px solid var(--brand);outline-offset:2px}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}
-button.primary{font:inherit;font-size:15.5px;font-weight:800;color:#fff;background:var(--brand);
+button.primary{font:inherit;font-size:15.5px;font-weight:800;color:var(--on-brand);background:var(--brand);
   border:0;border-radius:12px;padding:14px 24px;cursor:pointer;min-height:48px}
 button.primary:disabled{opacity:.6;cursor:progress}
 button.ghost{font:inherit;font-size:14px;font-weight:600;color:var(--ink-soft);background:transparent;
@@ -134,8 +136,7 @@ details p{margin:6px 0 0}
 .counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 .counts button{font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;
   background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer;font-family:inherit}
-.counts button.active{background:var(--brand);border-color:var(--brand);color:#fff}
-.counts button.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.counts button.active{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
 .track{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
 .track label{position:relative;flex:1 1 200px}
 .track input{position:absolute;opacity:0;width:1px;height:1px}
@@ -190,6 +191,23 @@ pre.code{margin:10px 0 0;padding:12px 14px;border-radius:10px;background:var(--b
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .crumb{margin:14px 0 0;font-size:12.5px;color:var(--ink-soft)}
 .crumb a{color:var(--ink-soft)}
+/* 판정 결과 — 2·3단 필터와 분야 묶음 머리글. 배경은 항상 토큰으로만 칠한다
+   (다크 모드에서 밝은 회색이 남아 흰 글자가 사라지던 문제 방지). */
+.sub-bar{margin-top:10px;padding:10px 12px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:10px}
+.sub-bar .counts{margin:0}
+.field-bar{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.field-group{margin:14px 0 18px}
+.field-group-hdr{font-size:15px;margin:0 0 8px;padding:6px 10px;border-radius:8px;
+  background:var(--surface-3);color:var(--ink);display:flex;justify-content:space-between;
+  align-items:center}
+.share-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 12px}
+.share-bar button{font:inherit;font-size:13px;font-weight:700;padding:9px 14px;border-radius:10px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink);
+  cursor:pointer;min-height:40px}
+.share-bar button:hover{border-color:var(--brand);color:var(--brand-ink)}
+.share-flash{font-size:12.5px;font-weight:700;color:var(--ok)}
+.share-flash.is-error{color:var(--danger)}
 """
 
 
@@ -281,6 +299,8 @@ def _industry_options() -> str:
 
 
 def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
+    from . import static_files
+
     meta = catalog_meta or {}
     is_sample = str(meta.get("catalog_state") or "sample") != "synced"
     stats = meta.get("stats") or {}
@@ -319,6 +339,9 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         count=count,
         generated=generated,
         guides_footer=guides.footer_html(),
+        share_origin=static_files.base_url(),
+        share_keys=",".join(SHARE_PARAM_KEYS),
+        share_script=SHARE_SCRIPT,
         extra_script=ENTRY_SCRIPT + BATCH_SCRIPT,
         verification=site_verification.meta_tags(),
     )
@@ -326,8 +349,8 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
 
 ENTRY_SCRIPT = """
 (function(){
-  // 가이드 페이지에서 넘어온 ?q=·?track= 로 폼을 미리 채우고 바로 조회한다.
-  // 저장소·쿠키를 쓰지 않고 현재 주소만 읽는다.
+  // 가이드·공유 링크에서 넘어온 ?q=·?track=·?sido=·?sigungu= 로 폼을 미리 채우고 바로 조회한다.
+  // 저장소·쿠키를 쓰지 않고 현재 주소만 읽는다. 개인식별·준식별 값은 링크에 담지 않는다.
   try{
     var params = new URLSearchParams(window.location.search || '');
     var track = params.get('track');
@@ -338,12 +361,29 @@ ENTRY_SCRIPT = """
         radio.dispatchEvent(new Event('change', {bubbles: true}));
       }
     }
+    var sidoSelect = document.getElementById('sido');
+    var sigunguSelect = document.getElementById('sigungu');
+    var sido = params.get('sido');
+    var sigungu = params.get('sigungu');
+    if (sidoSelect && sido) {
+      sidoSelect.value = sido;
+      // 시·군·구 목록은 시·도 change 리스너가 다시 채운다.
+      if (sidoSelect.value === sido) {
+        sidoSelect.dispatchEvent(new Event('change', {bubbles: true}));
+      } else {
+        sidoSelect.value = '';
+      }
+    }
+    if (sigunguSelect && sigungu && sidoSelect && sidoSelect.value) {
+      sigunguSelect.value = sigungu;
+      if (sigunguSelect.value !== sigungu) { sigunguSelect.value = ''; }
+    }
     var q = params.get('q');
-    if (q) {
-      var keyword = document.getElementById('keyword');
-      var form = document.getElementById('check');
-      if (keyword && form) {
-        keyword.value = q;
+    var keyword = document.getElementById('keyword');
+    var form = document.getElementById('check');
+    if (keyword && form) {
+      if (q) { keyword.value = q; }
+      if (q || (sidoSelect && sidoSelect.value)) {
         form.dispatchEvent(new Event('submit', {cancelable: true}));
       }
     }
@@ -503,6 +543,190 @@ BATCH_SCRIPT = """
       runBtn.disabled = false;
     });
   });
+})();
+"""
+
+# 결과 공유에 담는 쿼리 파라미터 — 개인식별·준식별 값(출생연도·소득구간·자녀 연도 등)은
+# 링크에 넣지 않는다. 이 목록이 곧 링크에 들어가는 유일한 키다.
+SHARE_PARAM_KEYS = ("track", "sido", "sigungu", "q")
+
+# 판정 결과 공유·복사 — 짧은 브리지로 결과 데이터만 받고 나머지는 스스로 한다.
+# (템플릿이 str.format 이라 이 블록은 일반 문자열로 두고 `{share_script}` 로 끼운다.)
+SHARE_SCRIPT = """
+(function(){
+  var bar = document.getElementById('share-bar');
+  if (!bar) { return; }
+  var flash = document.getElementById('share-flash');
+  var origin = (bar.getAttribute('data-origin') || 'https://grnt-kr.onrender.com').replace(/[/]+$/, '');
+  var keys = (bar.getAttribute('data-keys') || 'track,sido,sigungu,q').split(',');
+  var summaryBtn = document.getElementById('copy-summary');
+  var linkBtn = document.getElementById('copy-link');
+  var LABELS = {
+    eligible_likely: '받을 가능성 높음',
+    check_needed: '조건 확인 필요',
+    insufficient_info: '정보 부족'
+  };
+  var last = null;
+  var flashTimer = null;
+
+  function trackValue(){
+    var picked = document.querySelector('input[name=track]:checked');
+    return picked ? picked.value : 'personal';
+  }
+
+  function trackLabel(track){
+    if (track === 'business') { return '창업·기업 트랙'; }
+    if (track === 'agent') { return '사업자·대리인 리포트'; }
+    return '개인·가구 트랙';
+  }
+
+  function num(value){
+    var n = Number(value);
+    if (!isFinite(n)) { return '0'; }
+    return String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  }
+
+  function fieldValue(id){
+    var node = document.getElementById(id);
+    return node ? String(node.value || '').trim() : '';
+  }
+
+  function rowLine(row, index){
+    var app = row.application || {};
+    var deadline = app.deadline || {};
+    var bits = [];
+    if (row.agency) { bits.push(row.agency); }
+    var when = deadline.label_ko || app.deadline_text || '';
+    if (when) { bits.push(when); }
+    return index + '. ' + (row.name || '이름 미기재') + (bits.length ? ' — ' + bits.join(' · ') : '');
+  }
+
+  function pickRows(rows){
+    var likely = [], check = [];
+    (rows || []).forEach(function(row){
+      var code = row.verdict && row.verdict.code;
+      if (code === 'eligible_likely' && likely.length < 5) { likely.push(row); }
+      else if (code === 'check_needed' && check.length < 5) { check.push(row); }
+    });
+    // 받을 가능성 높음이 3건 미만이면 조건 확인 필요로 채워 3~5건을 만든다.
+    var keep = Math.max(0, Math.min(check.length, 5 - likely.length, 3 - likely.length));
+    return {likely: likely, check: check.slice(0, keep)};
+  }
+
+  function summaryText(){
+    var result = (last && last.result) || {};
+    var rows = result.results || [];
+    var counts = result.counts || {};
+    var lines = ['[GRNT 지원금 판정 요약]'];
+    lines.push('트랙: ' + trackLabel(result.track || trackValue()));
+    var head = '대조: 제도 ' + num(result.scanned) + '건';
+    ['eligible_likely', 'check_needed', 'insufficient_info'].forEach(function(code){
+      var count = Number(counts[code] || 0);
+      if (count > 0) { head += ' · ' + LABELS[code] + ' ' + num(count) + '건'; }
+    });
+    lines.push(head);
+    if (result.closed_hidden) {
+      lines.push('지난 공고 ' + num(result.closed_hidden) + '건은 빼고 봤습니다.');
+    }
+    var picks = pickRows(rows);
+    if (picks.likely.length) {
+      lines.push('');
+      lines.push('[' + LABELS.eligible_likely + ']');
+      picks.likely.forEach(function(row, index){ lines.push(rowLine(row, index + 1)); });
+    }
+    if (picks.check.length) {
+      lines.push('');
+      lines.push('[' + LABELS.check_needed + ']');
+      picks.check.forEach(function(row, index){ lines.push(rowLine(row, index + 1)); });
+    }
+    if (!picks.likely.length && !picks.check.length) {
+      lines.push('');
+      lines.push('지금 조건으로는 올라온 후보가 없습니다. 지역·소득구간·상황을 바꿔 다시 확인해 보세요.');
+    }
+    lines.push('');
+    lines.push('출처: ' + origin);
+    lines.push('이름·주민등록번호 없이 조건만으로 확인한 사전 점검입니다. 확정 판정이 아니며 '
+      + '최종 확인은 공고문·주관기관에서 하세요.');
+    return lines.join('\\n');
+  }
+
+  function shareUrl(){
+    var values = {
+      track: trackValue(),
+      sido: fieldValue('sido'),
+      sigungu: fieldValue('sigungu'),
+      q: fieldValue('keyword')
+    };
+    var params = [];
+    keys.forEach(function(key){
+      var value = values[key];
+      if (value === undefined || value === null || value === '') { return; }
+      params.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+    });
+    return origin + '/' + (params.length ? '?' + params.join('&') : '');
+  }
+
+  function legacyCopy(text){
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    var copied = false;
+    try {
+      area.select();
+      area.setSelectionRange(0, area.value.length);
+      copied = document.execCommand('copy');
+    } catch (error) {
+      copied = false;
+    }
+    document.body.removeChild(area);
+    return copied;
+  }
+
+  function say(message, isError){
+    if (!flash) { return; }
+    flash.textContent = message;
+    flash.className = isError ? 'share-flash is-error' : 'share-flash';
+    if (flashTimer) { clearTimeout(flashTimer); }
+    flashTimer = setTimeout(function(){ flash.textContent = ''; }, 2600);
+  }
+
+  function copyText(text, okMessage){
+    var done = function(copied){
+      if (copied) { say(okMessage, false); } else { say('복사하지 못했습니다. 길게 눌러 직접 복사해 주세요.', true); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){ done(true); }, function(){ done(legacyCopy(text)); });
+    } else {
+      done(legacyCopy(text));
+    }
+  }
+
+  if (summaryBtn) {
+    summaryBtn.addEventListener('click', function(){
+      if (!last || !last.result) {
+        say('먼저 조건을 넣어 판정을 해 주세요.', true);
+        return;
+      }
+      copyText(summaryText(), '결과 요약 복사됨 ✓');
+    });
+  }
+
+  if (linkBtn) {
+    linkBtn.addEventListener('click', function(){
+      copyText(shareUrl(), '조건 링크 복사됨 ✓');
+    });
+  }
+
+  // 판정 화면이 결과를 그릴 때마다 최신 데이터를 넘겨받는다(저장 없음, 메모리만).
+  window.GRNT_SHARE = {
+    update: function(data){ last = data || null; },
+    summary: function(){ return summaryText(); },
+    url: function(){ return shareUrl(); }
+  };
 })();
 """
 
@@ -769,6 +993,11 @@ PAGE_TEMPLATE = """<!doctype html>
 
     <section class="card" id="results-card" hidden>
       <h2>판정 결과</h2>
+      <div class="share-bar" id="share-bar" data-origin="{share_origin}" data-keys="{share_keys}">
+        <button type="button" id="copy-summary">결과 요약 복사</button>
+        <button type="button" id="copy-link">조건 링크 복사</button>
+        <span class="share-flash" id="share-flash" role="status" aria-live="polite"></span>
+      </div>
       <p class="sub" id="results-sub"></p>
       <div class="counts" id="counts"></div>
       <div id="results"></div>
@@ -902,6 +1131,10 @@ PAGE_TEMPLATE = """<!doctype html>
 
   function renderResults(data){{
     lastData = data;
+    // 공유 버튼(결과 요약·조건 링크)이 방금 그린 결과를 쓰도록 넘겨 준다.
+    if (window.GRNT_SHARE && window.GRNT_SHARE.update) {{
+      window.GRNT_SHARE.update(data);
+    }}
     var result = data.result || {{}};
     var card = document.getElementById('results-card');
     var box = document.getElementById('results');
@@ -958,12 +1191,7 @@ PAGE_TEMPLATE = """<!doctype html>
     var verdictRows = kindRows;
     if (activeKind !== 'none') {{
       var subBox = document.createElement('div');
-      subBox.className = 'sub-bar-dyn';
-      subBox.style.marginTop = '10px';
-      subBox.style.padding = '10px 12px';
-      subBox.style.background = '#f8f9fb';
-      subBox.style.border = '1px solid #e6e8ee';
-      subBox.style.borderRadius = '10px';
+      subBox.className = 'sub-bar-dyn sub-bar';
 
       var labels = {{
         all: '전체',
@@ -1008,10 +1236,7 @@ PAGE_TEMPLATE = """<!doctype html>
           fieldCounts[b] = (fieldCounts[b] || 0) + 1;
         }});
         var fieldBar = document.createElement('div');
-        fieldBar.className = 'counts';
-        fieldBar.style.marginTop = '8px';
-        fieldBar.style.paddingTop = '8px';
-        fieldBar.style.borderTop = '1px dashed #dde1ea';
+        fieldBar.className = 'counts field-bar';
         var fAllBtn = document.createElement('button');
         fAllBtn.type = 'button';
         fAllBtn.className = activeField === 'all' ? 'active' : '';
@@ -1185,9 +1410,7 @@ PAGE_TEMPLATE = """<!doctype html>
         var list = grouped[fb];
         if (!list || !list.length) return;
         var sec = el('div', 'field-group');
-        sec.style.margin = '14px 0 18px';
-        var hdr = el('h3', null, fb + ' (' + list.length + '건)');
-        hdr.style.cssText = 'font-size:15px;margin:0 0 8px;padding:6px 10px;background:#f3f4f6;border-radius:8px;display:flex;justify-content:space-between;align-items:center;';
+        var hdr = el('h3', 'field-group-hdr', fb + ' (' + list.length + '건)');
         sec.appendChild(hdr);
         var PREVIEW = 5;
         list.slice(0, PREVIEW).forEach(function(r){{ sec.appendChild(buildCard(r)); }});
@@ -1498,6 +1721,7 @@ PAGE_TEMPLATE = """<!doctype html>
   }});
 }})();
 </script>
+<script>{share_script}</script>
 <script>{extra_script}</script>
 </body>
 </html>
