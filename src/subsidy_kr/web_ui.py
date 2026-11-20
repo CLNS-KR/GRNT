@@ -995,7 +995,7 @@ PAGE_TEMPLATE = """<!doctype html>
         <div style="margin-top:14px">
           <label class="field">
             <span class="lab">키워드 필터 <span class="opt">선택 · 찾고 싶은 지원금만 좁혀 보기</span></span>
-            <input type="text" id="keyword" name="keyword" placeholder="예: 출산, 전세, 청년, 육아, 소상공인">
+            <input type="text" id="keyword" name="keyword" placeholder="예: 출산, 월세, 전기세, 병원비, 소상공인">
           </label>
           <div class="kw-chips" id="kw-chips">
             <button type="button" data-kw="출산">출산·임신</button>

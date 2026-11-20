@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from . import (agent_report, batch_client, conditions, engine, guides, local_portals, models,
-               programs, regions, snapshots, usage)
+               programs, regions, snapshots, synonyms, usage)
 from .catalog import Catalog
 from .version import __version__
 
@@ -122,6 +122,8 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         tag=str(args.get("tag") or "").strip() or None,
         keyword=str(args.get("keyword") or "").strip() or None,
         balance_kinds=bool(args.get("balance_kinds")),
+        # 사용자가 직접 치는 검색어는 동의어까지 본다(“전기세”→“전기요금” 등).
+        expand_keyword=True,
     )
     region_info = profile.get("region") or {}
     payload: Dict[str, Any] = {
@@ -140,6 +142,12 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         "next_questions": profile["missing_core"],
         "scope_limits_ko": SCOPE_LIMITS_KO,
     }
+    keyword_note = synonyms.describe(str(args.get("keyword") or ""))
+    if keyword_note:
+        payload["keyword_note_ko"] = (
+            f"{keyword_note} — 질의어를 그대로 담은 제도를 먼저 보여 주고, 동의어로만 걸린 제도는 "
+            "그 뒤에 관련도 순으로 붙입니다. 자격 판정은 조건으로 다시 확인합니다."
+        )
     if result["track"] == programs.TRACK_BUSINESS:
         payload["track_note_ko"] = (
             "창업·기업 트랙입니다. '받을 가능성 높음'은 신청자격 충족을 뜻하며, 선정은 평가·경쟁으로 "
@@ -508,6 +516,20 @@ def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = N
             "stats_url": static_files.base_url() + "/v1/stats",
         },
         "scope_limits_ko": SCOPE_LIMITS_KO,
+        "search": {
+            "synonym_groups": len(synonyms.CLUSTERS),
+            "max_variants_per_word": synonyms.MAX_VARIANTS,
+            "direct_match_first": True,
+            "expands": [
+                f"{word}→{'·'.join(term for term, _weight in synonyms.variants(word)[1:3])}"
+                for word in ("월세", "전기세", "병원비", "배달비", "인건비", "폐업")
+            ],
+            "note_ko": (
+                "keyword 는 생활어 사전으로 단어를 넓혀 봅니다. 질의어를 그대로 담은 제도를 먼저 "
+                "보여 주고, 동의어로만 걸린 제도는 그 뒤에 관련도 순으로 붙입니다. 사전에 없는 말"
+                "(지역명·숫자·제도명)은 넓히지 않습니다."
+            ),
+        },
         "guides": {
             "index_url": static_files.base_url() + "/guides/",
             "count": guides.GUIDE_COUNT,
@@ -695,7 +717,7 @@ TOOL_DEFS: List[Dict[str, Any]] = [
                 "include_closed": {"type": "boolean", "default": False,
                                    "description": "모집 마감된 공고도 포함할지"},
                 "tag": {"type": "string", "description": "청년·주거·창업·자금 등 주제 필터"},
-                "keyword": {"type": "string", "description": "제도명·내용 키워드"},
+                "keyword": {"type": "string", "description": "제도명·내용 키워드. 생활어도 됩니다(‘전기세’→전기요금, ‘병원비’→의료비로 동의어 확장, 직접 일치 우선)"},
             },
             "required": ["profile"],
         },

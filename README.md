@@ -17,7 +17,8 @@
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
 - 시·도 허브: `GET /regions/` · `GET /regions/{slug}` — 17개 시·도별 공고 수·분야 분포·마감 임박 목록·시·군·구별 공고 수(FAQPage·BreadcrumbList·WebPage JSON-LD)
-- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 51개(FAQPage JSON-LD)
+- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 61개(FAQPage JSON-LD)
+- 검색 동의어: `keyword` 검색은 **생활어 사전**(`synonyms.py`)으로 단어를 넓혀 봅니다 — "전기세"→전기요금·가스요금, "병원비"→의료비·진료비, "배달비"→택배비·배달앱. 질의어를 그대로 담은 제도가 항상 먼저 나옵니다
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
   동기화 없이 바로 실데이터로 뜹니다. 내장 샘플(개인 20 + 창업·기업 12)은 둘 다 없을 때의 오프라인 대체입니다.
@@ -254,7 +255,9 @@ CSV로 정리합니다. `POST /v1/batch-match`, `batch_match_clients` 툴, 웹 U
 
 사람들은 ChatGPT·Perplexity·네이버에 "청년 월세 지원 조건"처럼 **질문**으로 묻습니다. 그때
 인용되려면 질문 하나에 답 하나가 있는 페이지와, 기계가 읽을 구조화 데이터가 함께 있어야 합니다.
-`/guides/` 아래 51개 페이지가 그 역할을 합니다(기본 36개 + 2026-11 생활·육아·연말정산·소상공인 롱테일 15개).
+`/guides/` 아래 61개 페이지가 그 역할을 합니다(기본 36개 + 2026-11 생활·육아·연말정산·소상공인 롱테일 15개
++ 2026-11 소상공인·예비창업자·가계 10개 — 고용촉진장려금, 아이돌봄, 신혼부부 전세자금 이자지원,
+1인 자영업자 고용보험료, 학자금대출, 채무조정, 장기요양보험, 긴급복지, 예비창업 자금 조달, 배달·택배비).
 
 | 구성 | 내용 |
 |---|---|
@@ -338,6 +341,26 @@ sqlite3 data/app.sqlite "select id, day, topic, contact, message from inquiries 
 > 무료 Render 플랜은 영구 디스크가 없어 **재배포하면 문의도 사라집니다**. 리드를 살리려면
 > `GRNT_STATS_PATH` 를 영속 디스크 안 파일로 잡고, 재배포 전에 위 쿼리로 백업해 두세요.
 > (카운터와 같은 DB 를 쓰므로 디스크를 붙이면 통계도 함께 살아납니다.)
+
+---
+
+## 3-6. 검색 동의어 확장 `synonyms.py` (0.4.1)
+
+공고문은 "주거비·임차료·에너지바우처"처럼 제도 용어로 적혀 있는데, 사람은 "월세·전기세·병원비"로
+검색합니다. 검색이 단어 그대로의 부분 일치만 보면 이런 질의는 0~1건에서 멈춥니다.
+`synonyms.py` 가 생활어를 공고 용어로 이어 주고, 세 곳(메모리 카탈로그·SQLite 카탈로그·판정 엔진)이
+같은 사전을 봅니다.
+
+| 규칙 | 내용 |
+|---|---|
+| 직접 일치 우선 | 확장어는 가중치가 낮아, 같은 판정이면 질의어를 그대로 담은 제도가 항상 먼저 나옵니다 |
+| 넓은 말은 낮은 가중치 | "출산·돌봄"처럼 수백 건에 걸리는 말은 보조 가중치를 낮게 두고, 검색어로 직접 들어왔을 때만 1.0 |
+| 조사 제거 | "월세가"·"전기세는?"처럼 붙여 쓴 말도 사전에 닿습니다(한 글자 조사는 사전에 있는 말로 돌아갈 때만 뗌) |
+| 사전에 없으면 그대로 | 지역명·숫자·제도명은 확장하지 않습니다 — 없는 주제를 만들어 내지 않습니다 |
+| 상한 | 한 단어당 표기 6개까지(질의당 `LIKE` 폭주 방지) |
+
+`search_subsidies` 응답에는 확장이 일어난 경우 `keyword_note_ko`(예: "동의어 확장: 병원비→의료비·진료비")가
+붙습니다. 넓힌 결과는 질의어 일치 → 관련도 → 판정 순으로 줄을 세우므로, 원래 결과가 밀려나지 않습니다.
 
 ---
 
@@ -444,12 +467,13 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── pseo.py            /s/ 주제·지역 페이지(thin content 규칙)
     │   ├── regions.py         시도·시군구 정규화(소관기관명→지역) + /regions/ 시·도별 허브
     │   ├── local_portals.py   지자체 자체 복지포털 수집(부평·인천·서울WIS·경기·세종 등)
-    │   ├── guides.py          /guides/ 질문형 가이드 51개(FAQPage·실시간 공고 연결)
+    │   ├── guides.py          /guides/ 질문형 가이드 61개(FAQPage·실시간 공고 연결)
+│   ├── synonyms.py        검색어 동의어 사전(생활어 ↔ 공고 용어, 가중치·직접 일치 우선)
     │   ├── static_files.py    robots·llms·sitemap·server-card
     │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
     │   ├── usage.py           익명 일별 카운터 + 문의 폼 검증·저장 경계
     │   └── version.py         버전
-    └── tests/                 unittest 31개 파일 · 577건
+    └── tests/                 unittest 33개 파일 · 612건
 ```
 
 ### 5-1. 응답 시간과 캐시
@@ -559,7 +583,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.0` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.1` 태그로 게시합니다.
 
 ## 9. 라이선스
 

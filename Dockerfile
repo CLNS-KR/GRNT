@@ -4,7 +4,7 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="GRNT" \
       org.opencontainers.image.description="Korean personal + startup/SME grant eligibility checker (web UI + JSON API + MCP)" \
-      org.opencontainers.image.version="0.4.0"
+      org.opencontainers.image.version="0.4.1"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

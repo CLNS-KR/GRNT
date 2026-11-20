@@ -22,12 +22,11 @@ import gzip
 import hashlib
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import conditions, deadlines, programs, regions, sample_data, sample_programs
+from . import conditions, deadlines, programs, regions, sample_data, sample_programs, synonyms
 
 # 서비스분야 → 화면용 짧은 이름
 FIELD_LABELS: Dict[str, str] = {
@@ -351,6 +350,16 @@ def normalize_service(raw: Dict[str, Any], source: str = "sample") -> Service:
     )
 
 
+def search_text(service: "Service") -> str:
+    """검색·매칭에 쓰는 문서 본문(이름·목적·대상·내용·기관·해시태그).
+
+    세 곳(메모리 카탈로그·SQLite 카탈로그·판정 엔진)이 같은 문자열을 봐야
+    같은 질의에 같은 결과가 나온다.
+    """
+    return (f"{service.name} {service.purpose} {service.target} {service.content} "
+            f"{service.agency} {' '.join(service.business.get('hashtags') or [])}")
+
+
 class Catalog:
     """서비스 목록 + 색인. 읽기 전용으로만 쓴다."""
 
@@ -411,23 +420,26 @@ class Catalog:
         return out
 
     def search(self, keyword: str, limit: int = 20,
-               *, region: Optional[Dict[str, str]] = None) -> List[Service]:
-        words = [word for word in re.split(r"\s+", str(keyword or "").strip()) if word]
-        if not words:
+               *, region: Optional[Dict[str, str]] = None,
+               expand: bool = True) -> List[Service]:
+        """키워드 검색 — 단어별 동의어까지 함께 본다(직접 일치가 항상 위).
+
+        `expand=False` 면 예전처럼 질의어 그대로의 부분 일치만 본다.
+        """
+        groups = synonyms.plan(keyword) if expand else [[(word, 1.0)] for word in
+                                                         synonyms.sql_like_terms(keyword, literal_only=True)]
+        if not groups:
             return []
         hits: List[tuple] = []
         for svc in self.services:
-            haystack = (f"{svc.name} {svc.purpose} {svc.target} {svc.content} {svc.agency} "
-                        f"{' '.join(svc.business.get('hashtags') or [])}")
-            score = sum(haystack.count(word) for word in words)
+            haystack = search_text(svc)
+            score = synonyms.score(svc.name, haystack, groups)
             if not score:
                 continue
             if region and region.get("level") in ("sido", "sigungu"):
                 match = regions.match_region(region, svc.region)
                 if match["state"] == "mismatch":
                     continue
-            # 이름에 걸린 단어에 가중치를 준다
-            score += 3 * sum(svc.name.count(word) for word in words)
             hits.append((score, svc))
         hits.sort(key=lambda pair: (-pair[0], pair[1].name))
         return [svc for _score, svc in hits[:max(1, limit)]]

@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import programs, regions
-from .catalog import Catalog, Service, normalize_service
+from . import programs, regions, synonyms
+from .catalog import Catalog, Service, normalize_service, search_text
 
 
 def build_sqlite_from_rows(
@@ -73,16 +72,7 @@ def build_sqlite_from_rows(
                 closed_biz_count += 1
             reg = svc.region or {}
             recruiting = str((svc.business or {}).get("recruiting") or "")
-            search_text = " ".join(
-                [
-                    svc.name,
-                    svc.purpose,
-                    svc.target,
-                    svc.content,
-                    svc.agency,
-                    " ".join((svc.business or {}).get("hashtags") or []),
-                ]
-            )
+            body = search_text(svc)
             insert_rows.append(
                 (
                     idx,
@@ -99,7 +89,7 @@ def build_sqlite_from_rows(
                     svc.agency or "",
                     svc.source or "gov24",
                     svc.name or "",
-                    search_text,
+                    body,
                     json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
                 )
             )
@@ -249,6 +239,7 @@ class SQLiteCatalog:
         include_closed: bool = False,
         tag: Optional[str] = None,
         keyword: Optional[str] = None,
+        keyword_expand: bool = False,
         max_scan: int = 20000,
     ) -> List[Service]:
         """트랙·지역·마감·키워드 필터를 SQL 레벨에서 1차로 좁혀 필요한 행만 로드한다."""
@@ -279,11 +270,18 @@ class SQLiteCatalog:
                 )
                 params.append(province)
 
+        keyword_groups: List[List[tuple]] = []
         if keyword:
-            for word in str(keyword).split():
-                if word:
-                    conds.append("search_text LIKE ?")
-                    params.append(f"%{word}%")
+            if keyword_expand:
+                keyword_groups = synonyms.plan(keyword)
+            else:
+                keyword_groups = [[(term, 1.0)] for term in
+                                  synonyms.sql_like_terms(keyword, literal_only=True)]
+            # 단어 사이는 AND, 한 단어의 표기들은 OR — 예전 동작(단어별 LIKE AND)과 같다.
+            for group in keyword_groups:
+                marks = " OR ".join("search_text LIKE ?" for _ in group)
+                conds.append(f"({marks})")
+                params.extend(f"%{term}%" for term, _weight in group)
 
         where = ("WHERE " + " AND ".join(conds)) if conds else ""
         sql = f"SELECT row_json FROM services {where} ORDER BY idx LIMIT ?"
@@ -303,6 +301,8 @@ class SQLiteCatalog:
                 continue
             if tag and tag not in svc.tags:
                 continue
+            if keyword_groups and keyword_expand and not synonyms.matches(search_text(svc), keyword_groups):
+                continue
             out.append(svc)
         return out
 
@@ -312,16 +312,23 @@ class SQLiteCatalog:
         limit: int = 20,
         *,
         region: Optional[Dict[str, str]] = None,
+        expand: bool = True,
     ) -> List[Service]:
-        words = [word for word in re.split(r"\s+", str(keyword or "").strip()) if word]
-        if not words:
+        """키워드 검색 — 단어별 동의어까지 함께 본다(직접 일치가 항상 위)."""
+        groups = (synonyms.plan(keyword) if expand
+                  else [[(word, 1.0)]
+                        for word in synonyms.sql_like_terms(keyword, literal_only=True)])
+        if not groups:
             return []
-        conds = ["search_text LIKE ?" for _ in words]
-        params: List[Any] = [f"%{w}%" for w in words]
+        like_terms = [term for group in groups for term, _weight in group]
+        if not like_terms:
+            return []
+        where = " OR ".join("search_text LIKE ?" for _ in like_terms)
+        params: List[Any] = [f"%{term}%" for term in like_terms]
         conn = self._connect()
         try:
             rows = conn.execute(
-                f"SELECT row_json FROM services WHERE {' AND '.join(conds)} ORDER BY idx",
+                f"SELECT row_json FROM services WHERE {where} ORDER BY idx",
                 params,
             ).fetchall()
         finally:
@@ -330,18 +337,14 @@ class SQLiteCatalog:
         hits: List[Tuple[int, Service]] = []
         for (row_json,) in rows:
             svc = self._row_to_service(row_json)
-            haystack = (
-                f"{svc.name} {svc.purpose} {svc.target} {svc.content} {svc.agency} "
-                f"{' '.join(svc.business.get('hashtags') or [])}"
-            )
-            score = sum(haystack.count(word) for word in words)
+            haystack = search_text(svc)
+            score = synonyms.score(svc.name, haystack, groups)
             if not score:
                 continue
             if region and region.get("level") in ("sido", "sigungu"):
                 match = regions.match_region(region, svc.region)
                 if match["state"] == "mismatch":
                     continue
-            score += 3 * sum(svc.name.count(word) for word in words)
             hits.append((score, svc))
         hits.sort(key=lambda pair: (-pair[0], pair[1].name))
         return [svc for _score, svc in hits[: max(1, limit)]]

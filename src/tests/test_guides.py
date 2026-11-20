@@ -157,6 +157,66 @@ class LongTailGuidesTest(unittest.TestCase):
         self.assertIn(f"가이드 {guides.GUIDE_COUNT}개 전체 보기", home)
 
 
+class SosangonginBatchGuidesTest(unittest.TestCase):
+    """2026-11 소상공인·예비창업자·가계 질문 10종(51 → 61)."""
+
+    BATCH = (
+        "goyong-chokjin-jangnyeogeum", "aidolbom-seobiseu", "sinhonbubu-jeonse-ija",
+        "1in-jayeongeopja-goyongboheom", "haksaeng-jageum-daechul", "chaejeong-jojeong",
+        "noin-janggiyoyang", "geungnip-bokji", "yebichangup-jageum",
+        "sosanggongin-baedal-taekbae",
+    )
+    def setUp(self):
+        self.catalog = sample_catalog()
+
+    def slugs(self):
+        return list(self.BATCH)
+
+    def test_total_is_sixty_one(self):
+        self.assertEqual(guides.GUIDE_COUNT, 61)
+
+    def test_ten_new_guides_exist_and_are_complete(self):
+        self.assertEqual(len(set(self.slugs())), 10)
+        for slug in self.slugs():
+            guide = guides.by_slug(slug)
+            self.assertIsNotNone(guide, slug)
+            self.assertGreaterEqual(len(guide["conditions"]), 4, slug)
+            self.assertGreaterEqual(len(guide["pitfalls"]), 2, slug)
+            self.assertTrue(guide["question"].endswith("?"), slug)
+            for other in guide["related"]:
+                self.assertIsNotNone(guides.by_slug(other), f"{slug} → {other}")
+
+    def test_new_guides_do_not_fix_amounts(self):
+        for slug in self.slugs():
+            page = guides.render_item(slug, self.catalog)
+            self.assertIsNone(re.search(r"\d[\d,]*\s*만?원", page), slug)
+
+    def test_new_guides_render_with_faq_and_breadcrumb(self):
+        for slug in self.slugs():
+            page = guides.render_item(slug, self.catalog)
+            self.assertIsNotNone(page, slug)
+            types = [block.get("@type") for block in json_ld_blocks(page)]
+            self.assertIn("FAQPage", types, slug)
+            self.assertIn("BreadcrumbList", types, slug)
+            self.assertIn("지금 열려 있는 관련 공고", page, slug)
+            self.assertIn(guides.DISCLAIMER_KO, page, slug)
+
+    def test_new_guides_reach_sitemap_and_llms(self):
+        xml = static_files.sitemap_xml(self.catalog, base="https://example.test")
+        text = static_files.llms_txt(self.catalog, base="https://example.test")
+        for slug in self.slugs():
+            self.assertIn(f"<loc>https://example.test/guides/{slug}</loc>", xml)
+            self.assertIn(f"https://example.test/guides/{slug}", text)
+
+    def test_briefed_topics_are_covered(self):
+        text = " ".join(f"{g['slug']} {g['question']} {g['topic']} {g['one_line']}"
+                        for g in guides.GUIDES)
+        for needle in ("고용촉진장려금", "아이돌봄", "신혼부부", "자영업자 고용보험",
+                       "학자금대출", "채무조정", "장기요양", "긴급복지", "예비창업",
+                       "배달비", "택배비"):
+            self.assertIn(needle, text, needle)
+
+
 class GuidesRenderTest(unittest.TestCase):
     def setUp(self):
         self.catalog = sample_catalog()

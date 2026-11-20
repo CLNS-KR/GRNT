@@ -29,7 +29,7 @@ from collections import OrderedDict
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import conditions, models, programs, regions
+from . import conditions, models, programs, regions, synonyms
 from .catalog import Catalog, Service
 
 PASS = "pass"
@@ -1110,12 +1110,13 @@ def _copy_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
                     tag: Optional[str], keyword: Optional[str],
-                    include_closed: bool) -> List[Service]:
+                    include_closed: bool, expand_keyword: bool = False) -> List[Service]:
     """트랙·지역·마감·태그·검색어로 후보를 줄인 목록 — 필터 조합별로 한 번만 만든다."""
     region = profile["region"]
     key = (region.get("level"), region.get("sido"), region.get("sigungu"),
            profile.get("track", "all"), bool((profile.get("business") or {}).get("declared")),
-           bool(include_closed), tag or "", keyword or "", int(max_scan))
+           bool(include_closed), tag or "", keyword or "", int(max_scan),
+           bool(expand_keyword))
     cache = catalog.memo.get("pools")
     if cache is None:
         cache = {}
@@ -1133,6 +1134,7 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
             include_closed=include_closed,
             tag=tag,
             keyword=keyword,
+            keyword_expand=expand_keyword,
             max_scan=max_scan,
         )
     else:
@@ -1152,11 +1154,19 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
         if tag:
             pool = [svc for svc in pool if tag in svc.tags]
         if keyword:
-            words = [word for word in str(keyword).split() if word]
-            pool = [svc for svc in pool
-                    if all(word in f"{svc.name} {svc.purpose} {svc.target} "
-                                    f"{' '.join(svc.business.get('hashtags') or [])}"
-                           for word in words)]
+            if expand_keyword:
+                groups = synonyms.plan(keyword)
+                pool = [svc for svc in pool
+                        if synonyms.matches(
+                            f"{svc.name} {svc.purpose} {svc.target} "
+                            f"{' '.join(svc.business.get('hashtags') or [])}",
+                            groups)]
+            else:
+                words = [word for word in str(keyword).split() if word]
+                pool = [svc for svc in pool
+                        if all(word in f"{svc.name} {svc.purpose} {svc.target} "
+                                        f"{' '.join(svc.business.get('hashtags') or [])}"
+                               for word in words)]
 
     if len(cache) >= POOL_CACHE_MAX:
         cache.clear()
@@ -1167,17 +1177,24 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
 def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
            include_ineligible: bool = False, tag: Optional[str] = None,
            keyword: Optional[str] = None, max_scan: int = 20000,
-           include_closed: bool = False, balance_kinds: bool = False) -> Dict[str, Any]:
-    """프로필로 후보 제도를 판정한다. 트랙·지역·마감 여부로 후보를 줄인 뒤 판정한다."""
+           include_closed: bool = False, balance_kinds: bool = False,
+           expand_keyword: bool = False) -> Dict[str, Any]:
+    """프로필로 후보 제도를 판정한다. 트랙·지역·마감 여부로 후보를 줄인 뒤 판정한다.
+
+    `expand_keyword=True` 면 키워드를 `synonyms` 사전으로 넓혀 본다("전기세"→"전기요금" 등).
+    넓혀 걸린 제도는 질의어를 그대로 담은 제도 뒤에 놓이고, 기본값(False)은 예전처럼
+    질의어 그대로의 부분 일치 AND 만 본다 — 화면·API 처럼 사용자가 직접 검색하는 경로만 켠다.
+    """
     cache = _result_cache(catalog)
     cache_key = (profile_key(profile), int(limit), bool(include_ineligible),
-                 tag or "", keyword or "", int(max_scan), bool(include_closed), bool(balance_kinds))
+                 tag or "", keyword or "", int(max_scan), bool(include_closed),
+                 bool(balance_kinds), bool(expand_keyword))
     hit = cache.get(cache_key)
     if hit is not None:
         return _copy_result(hit)
 
     pool = _candidate_pool(catalog, profile, max_scan=max_scan, tag=tag, keyword=keyword,
-                           include_closed=include_closed)
+                           include_closed=include_closed, expand_keyword=expand_keyword)
     track = profile.get("track", "all")
 
     results = [evaluate_service(svc, profile) for svc in pool]
@@ -1185,7 +1202,26 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
         shown = [row for row in results if row["verdict"]["code"] != models.VERDICT_INELIGIBLE]
     else:
         shown = results
-    shown.sort(key=_sort_key)
+    if expand_keyword and keyword:
+        # 동의어로 넓혀 찾은 검색은 두 줄로 세운다.
+        #  1) 질의어를 그대로 담은 제도 — 예전과 같은 판정 순서(_sort_key)
+        #  2) 동의어로만 걸린 제도 — 질의어에 가까운 순서 → 판정 순서
+        # 넓힌 결과가 원래 결과를 밀어내지 않게 하는 장치다.
+        groups = synonyms.plan(keyword)
+        relevance: Dict[str, int] = {}
+        strict_ids = set()
+        for svc in pool:
+            body = f"{svc.purpose} {svc.target} {' '.join(svc.business.get('hashtags') or [])}"
+            relevance[svc.service_id] = synonyms.score(svc.name, body, groups)
+            if synonyms.literal_hit(svc.name, body, keyword):
+                strict_ids.add(svc.service_id)
+        direct = [row for row in shown if row.get("service_id") in strict_ids]
+        related = [row for row in shown if row.get("service_id") not in strict_ids]
+        direct.sort(key=_sort_key)
+        related.sort(key=lambda row: (-relevance.get(row.get("service_id"), 0), _sort_key(row)))
+        shown = direct + related
+    else:
+        shown.sort(key=_sort_key)
     counts: Dict[str, int] = {code: 0 for code in models.VERDICT_ORDER}
     for row in results:
         counts[row["verdict"]["code"]] += 1
