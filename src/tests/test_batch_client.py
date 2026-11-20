@@ -559,8 +559,23 @@ class HttpBatchTest(unittest.TestCase):
         self.assertFalse(json.loads(text)["ok"])
 
     def test_oversized_body_is_413(self):
-        status, text, _ = self._request("/v1/batch-match", b"x" * (batch_client.MAX_CLIENTS + 600000))
-        self.assertEqual(status, 413)
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            payload = b"x" * (batch_client.MAX_CLIENTS + 600000)
+            conn.putrequest("POST", "/v1/batch-match")
+            conn.putheader("Content-Type", "text/plain")
+            conn.putheader("Content-Length", str(len(payload)))
+            conn.endheaders()
+            try:
+                conn.send(payload)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            resp = conn.getresponse()
+            self.assertEqual(resp.status, 413)
+        finally:
+            conn.close()
 
     def test_too_many_clients_is_400(self):
         rows = [{"client_ref": f"C-{index:03d}", "industry": "food"}
