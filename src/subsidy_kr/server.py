@@ -579,9 +579,10 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
                 return
             if result.get("ok"):
                 # 문의는 재배포 시 카운터·DB 와 함께 사라질 수 있다(무료 플랜은 영구 디스크가 없다).
-                # 접수번호·주제만 로그에 남겨(연락처·내용 없이) 최소한 "들어왔다는 사실"은 잃지 않게 한다.
+                # 접수번호·주제·유입 태그만 로그에 남겨(연락처·내용 없이) 최소한 "들어왔다는 사실"은 잃지 않게 한다.
                 print(f"inquiry accepted receipt={result.get('receipt') or '-'} "
-                      f"topic={result.get('topic')} duplicate={bool(result.get('duplicate'))}",
+                      f"topic={result.get('topic')} cohort={result.get('cohort') or '-'} "
+                      f"duplicate={bool(result.get('duplicate'))}",
                       flush=True)
                 self._send_json(200, result)
                 return

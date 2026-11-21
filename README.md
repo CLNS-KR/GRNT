@@ -13,7 +13,7 @@
 - JSON API: `POST /v1/tools/{tool}` — 툴 9종
 - 거래처 전달용: `POST`(또는 `GET`) `/v1/report/export.csv` · `/v1/report/print.html` — 세무사·노무사용 요약 표(1곳)
 - 거래처 일괄(익명): `POST /v1/batch-match` — 세무·노무사무소 거래처 50~300곳 CSV → 거래처별 3~5건 + 1페이지 요약 HTML·CSV
-- 사전 신청·문의: `POST /v1/inquiry` — 홈 화면 푸터 위 미니 카드(세무·노무사 리포트·대량 매칭 문의)가 보내는 창구. 연락처는 회신 목적으로만 저장하고 통계에는 넣지 않습니다
+- 사전 신청·문의: `POST /v1/inquiry` — 홈 화면 푸터 위 미니 카드(세무·노무사 리포트·대량 매칭 문의)가 보내는 창구. 연락처는 회신 목적으로만 저장하고 통계에는 넣지 않습니다. 선택 필드 `cohort`(별칭 `source`)로 무료 베타·소개 유입 태그(`beta_pilot`, `citechart` 등 40자)를 붙일 수 있습니다
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
 - 시·도 허브: `GET /regions/` · `GET /regions/{slug}` — 16개 시·도별 공고 수·분야 분포·마감 임박 목록·시·군·구별 공고 수(FAQPage·BreadcrumbList·WebPage JSON-LD)
@@ -386,6 +386,31 @@ sqlite3 data/app.sqlite "select id, day, topic, contact, message from inquiries 
 
 ---
 
+## 3-9. 무료 베타 유입 태그·생태계 링크 (0.4.4)
+
+`POST /v1/inquiry` 에 **선택** 필드 `cohort`(별칭 `source`)를 더했습니다. 무료 베타 테스터나
+소개 글(예: `citechart`)에서 온 문의를 나중에 구분해 셀 수 있게 하는 40자 이내 태그입니다.
+
+```bash
+curl -s -X POST https://grnt-kr.onrender.com/v1/inquiry \
+  -H 'Content-Type: application/json' \
+  -d '{"contact":"...","topic":"batch_report","cohort":"beta_pilot"}'
+# → {"ok":true,"receipt":"I00001","topic":"batch_report","cohort":"beta_pilot", ...}
+```
+
+| 항목 | 동작 |
+|---|---|
+| 허용값 | 영문 소문자·숫자와 `.` `_` `:` `-`, 1~40자(대문자는 소문자로 정규화). 빈 값·미전송은 종전과 동일 |
+| 저장 | `inquiries.cohort` (기존 DB는 기동 시 열만 자동 추가) |
+| 사본·알림 | `GRNT_INQUIRY_SINK` JSONL 과 `GRNT_INQUIRY_WEBHOOK` 본문에 `cohort` 포함(웹훅의 `source:"grnt"` 는 서비스 이름으로 그대로) |
+| 운영 요약 | `usage.inquiry_summary(store)` 의 `by_cohort` — 태그별 건수만 세고 연락처·내용은 읽지 않음(GRNT 는 별도 관리자 엔드포인트가 없어 DB·미러 파일·이 헬퍼로 확인) |
+| 공개 통계 | `/v1/stats` 에는 넣지 않음(종전 익명 계약 유지) |
+| 잘못된 값 | `400 invalid_cohort` + 한국어 안내, 저장하지 않음 |
+
+웹 화면의 `같이 쓰는 서비스` 카드와 푸터에서는 CLNS(수입·유통)·FRNC(프랜차이즈)로 한 줄씩
+이어집니다 — 세 서비스 모두 무료·회원가입 없음입니다. 웹 문의 카드도 `/?cohort=beta_pilot`
+처럼 태그가 붙은 링크로 들어오면 그 값을 함께 보냅니다(형식이 틀리면 보내지 않음).
+
 ## 3-8. 메모리·속도·색인 정리 (0.4.3)
 
 `Pilotage(@pilot)` 님 측 코드·라이브 검수 리포트의 긴급/높음/운영 개선점을 재검증해 고친 버전입니다.
@@ -634,7 +659,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.3` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.4` 태그로 게시합니다.
 
 ## 9. 라이선스
 

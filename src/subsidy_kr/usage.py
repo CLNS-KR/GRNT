@@ -76,6 +76,12 @@ INQUIRY_TOPIC_LABELS = {
 INQUIRY_CONTACT_MIN = 3
 INQUIRY_CONTACT_MAX = 120
 INQUIRY_MESSAGE_MAX = 500
+# 무료 베타 파일럿 구분 태그(0.4.4). 선택 입력 — 베타 테스터·소개 글에서 온 문의를
+# 나중에 구분해 세기 위한 값이며, 없으면 종전과 똑같이 동작한다(하위 호환).
+# `cohort` 를 먼저 읽고, 없으면 `source` 를 쓴다.
+INQUIRY_COHORT_MAX = 40
+INQUIRY_COHORT_FIELDS = ("cohort", "source")
+INQUIRY_COHORT_EXAMPLES_KO = "beta_pilot·citechart"
 INQUIRY_DAILY_CAP = 200      # 같은 날 접수 상한(스팸으로 무료 인스턴스 디스크를 채우지 않게)
 INQUIRY_KEEP_DAYS = 180      # 회신 목적이 끝난 연락처 보관 기간
 # 문의 유실 대비 — 무료 플랜은 영구 디스크가 없어 재배포 때 SQLite 가 초기화된다.
@@ -97,6 +103,7 @@ _HAS_WORD_RE = re.compile(r"[A-Za-z]{2,}")
 _HAS_ANY_RE = re.compile(r"[0-9A-Za-z가-힣]")
 _CONTACT_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _MESSAGE_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_COHORT_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,%d}$" % (INQUIRY_COHORT_MAX - 1))
 
 
 def today_kst() -> str:
@@ -251,6 +258,8 @@ INQUIRY_ERRORS_KO = {
     "contact_too_short": f"연락처를 {INQUIRY_CONTACT_MIN}자 이상 적어 주세요.",
     "contact_too_long": f"연락처는 {INQUIRY_CONTACT_MAX}자까지 쓸 수 있습니다.",
     "invalid_topic": "문의 유형을 다시 선택해 주세요.",
+    "invalid_cohort": (f"베타 구분 태그는 {INQUIRY_COHORT_MAX}자까지, 영문 소문자·숫자와 "
+                       f". _ : - 만 쓸 수 있습니다({INQUIRY_COHORT_EXAMPLES_KO})."),
     "message_too_long": f"문의 내용은 {INQUIRY_MESSAGE_MAX}자까지 쓸 수 있습니다.",
     "daily_cap_reached": "오늘 접수 한도에 닿았습니다. 내일 다시 보내 주시거나 API·MCP 주소로 남겨 주세요.",
     "store_unavailable": "지금은 문의를 저장할 수 없습니다. 잠시 뒤 다시 시도해 주세요.",
@@ -267,6 +276,28 @@ def clean_message(value: Any) -> str:
     """문의 내용 — 줄바꿈·탭은 남기고 나머지 제어문자만 지운다."""
     text = _MESSAGE_CTRL_RE.sub(" ", str(value or "")[:2000])
     return text.strip()
+
+
+def clean_cohort(payload: Dict[str, Any]) -> tuple:
+    """선택 필드 `cohort`(별칭 `source`) → `(태그, 오류 코드)`.
+
+    값이 없거나 빈 문자열이면 `("", None)` — 종전 요청과 똑같이 취급한다.
+    """
+    raw: Any = None
+    for field in INQUIRY_COHORT_FIELDS:
+        if field in payload and payload.get(field) is not None:
+            raw = payload.get(field)
+            break
+    if raw is None:
+        return "", None
+    if not isinstance(raw, str):
+        return "", "invalid_cohort"
+    tag = raw.strip().lower()
+    if not tag:
+        return "", None
+    if len(tag) > INQUIRY_COHORT_MAX or not _COHORT_RE.match(tag):
+        return "", "invalid_cohort"
+    return tag, None
 
 
 def normalize_inquiry(payload: Any) -> tuple:
@@ -286,7 +317,10 @@ def normalize_inquiry(payload: Any) -> tuple:
     message = clean_message(data.get("message"))
     if len(message) > INQUIRY_MESSAGE_MAX:
         return {}, "message_too_long"
-    return {"contact": contact, "topic": topic, "message": message}, None
+    cohort, cohort_error = clean_cohort(data)
+    if cohort_error:
+        return {}, cohort_error
+    return {"contact": contact, "topic": topic, "message": message, "cohort": cohort}, None
 
 
 def save_inquiry(store: Any, data: Dict[str, Any], day: Optional[str] = None) -> Dict[str, Any]:
@@ -301,12 +335,13 @@ def save_inquiry(store: Any, data: Dict[str, Any], day: Optional[str] = None) ->
     contact = str(data.get("contact") or "")
     topic = str(data.get("topic") or "")
     message = str(data.get("message") or "")
+    cohort = str(data.get("cohort") or "")[:INQUIRY_COHORT_MAX]
     try:
         if store.inquiry_exists(stamp, topic, contact, message):
             return {"stored": False, "duplicate": True}
         if store.inquiry_count(stamp) >= INQUIRY_DAILY_CAP:
             return {"stored": False, "duplicate": False, "error": "daily_cap_reached"}
-        row_id = store.add_inquiry(stamp, topic, contact, message)
+        row_id = store.add_inquiry(stamp, topic, contact, message, cohort=cohort)
     except Exception:  # noqa: BLE001 - 저장 실패가 응답 형식을 바꾸지 않게
         return {"stored": False, "duplicate": False, "error": "store_unavailable"}
     receipt = f"I{int(row_id):05d}"
@@ -336,6 +371,7 @@ def _append_inquiry_sink(path: str, data: Dict[str, Any], stamp: str, receipt: s
     """접수 1건을 JSON 한 줄로 덧붙인다(영속 디스크에 두면 재배포에도 남는다)."""
     line = json.dumps({"receipt": receipt, "day": stamp, "topic": data.get("topic"),
                        "contact": data.get("contact"), "message": data.get("message"),
+                       "cohort": data.get("cohort") or "",
                        "received_at": datetime.now(KST).isoformat(timespec="seconds")},
                       ensure_ascii=False, separators=(",", ":"))
     try:
@@ -360,6 +396,7 @@ def _notify_inquiry_hook(url: str, data: Dict[str, Any], stamp: str, receipt: st
         return False
     payload = json.dumps({"receipt": receipt, "day": stamp, "topic": data.get("topic"),
                           "contact": data.get("contact"), "message": data.get("message"),
+                          "cohort": data.get("cohort") or "",
                           "source": "grnt"},
                          ensure_ascii=False).encode("utf-8")
 
@@ -384,16 +421,23 @@ def _notify_inquiry_hook(url: str, data: Dict[str, Any], stamp: str, receipt: st
 def inquiry_summary(store: Any) -> Dict[str, Any]:
     """주제별 접수 건수만 — 연락처·내용은 읽지 않는다(운영 확인용)."""
     counts: Dict[str, int] = {}
+    cohort_counts: Dict[str, int] = {}
     try:
         counts = store.inquiry_topic_counts() if store is not None else {}
     except Exception:  # noqa: BLE001
         counts = {}
+    try:
+        cohort_counts = store.inquiry_cohort_counts() if store is not None else {}
+    except Exception:  # noqa: BLE001 - 0.4.4 이전 DB 도 요약은 뜨게 한다
+        cohort_counts = {}
     total = sum(counts.values())
     return {
         "total": total,
         "by_topic": [{"topic": topic, "label_ko": INQUIRY_TOPIC_LABELS[topic],
                       "count": int(counts.get(topic, 0))}
                      for topic in INQUIRY_TOPICS],
+        "by_cohort": [{"cohort": tag or "(태그 없음)", "count": int(count)}
+                      for tag, count in sorted(cohort_counts.items(), key=lambda kv: -kv[1])],
         "stores_contact": True,
         "in_usage_stats": False,
         "keep_days": INQUIRY_KEEP_DAYS,

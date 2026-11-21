@@ -1028,9 +1028,11 @@ def submit_inquiry(payload: Any, store: Any = None,
     """`POST /v1/inquiry` — 사전 신청·문의 접수(리드 수집).
 
     받는 것: `contact`(이메일·연락처 3~120자) · `topic`(`batch_report`|`api_mcp`|`other`) ·
-    `message`(선택 0~500자). 연락처는 회신 목적으로만 `inquiries` 표에 저장하고 **응답에
-    되돌려 보내지 않으며**(개인정보 재노출 금지) `/v1/stats` 에도 넣지 않는다. 판정 프로필과는
-    다른 경로라 나이·지역·소득 같은 입력은 읽지도 않는다.
+    `message`(선택 0~500자) · `cohort`(선택 0~40자, 별칭 `source`). 연락처는 회신
+    목적으로만 `inquiries` 표에 저장하고 **응답에 되돌려 보내지 않으며**(개인정보 재노출 금지)
+    `/v1/stats` 에도 넣지 않는다. 판정 프로필과는 다른 경로라 나이·지역·소득 같은 입력은
+    읽지도 않는다. `cohort` 는 무료 베타·소개 유입 구분 태그(`beta_pilot`, `citechart` 등)로,
+    저장ㆍ미러ㆍ알림ㆍ운영 요약까지만 쓰고 공개 통계에는 쓰지 않는다.
     """
     clean, error = usage.normalize_inquiry(payload)
     if error:
@@ -1057,6 +1059,7 @@ def submit_inquiry(payload: Any, store: Any = None,
         "receipt": saved.get("receipt"),
         "topic": clean["topic"],
         "topic_label_ko": usage.INQUIRY_TOPIC_LABELS[clean["topic"]],
+        "cohort": clean.get("cohort") or "",
         "message_ko": ("같은 내용이 이미 접수되어 있습니다. 회신드리겠습니다." if duplicate else
                        "접수됐습니다. 남겨 주신 연락처로만 회신드립니다."),
         "privacy": {

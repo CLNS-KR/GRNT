@@ -569,6 +569,15 @@ INQUIRY_SCRIPT = """
 
   function say(text){ statusEl.textContent = text; }
 
+  // 무료 베타·소개 글 유입 태그(0.4.4) — ?cohort=beta_pilot 로 들어온 링크만 문의에 붙인다.
+  // 서버와 같은 규칙(영문 소문자·숫자와 . _ : -, 40자)을 먼저 확인해, 잘못된 값이면 보내지 않는다.
+  function cohortTag(){
+    try {
+      var value = String(new URLSearchParams(location.search).get('cohort') || '').trim().toLowerCase();
+      return /^[a-z0-9][a-z0-9._:-]{0,39}$/.test(value) ? value : '';
+    } catch (e) { return ''; }
+  }
+
   function send_inquiry(){
     var contact = String(contactEl.value || '').replace(/\\s+/g, ' ').trim();
     var message = String(messageEl.value || '').trim();
@@ -590,7 +599,8 @@ INQUIRY_SCRIPT = """
     fetch('/v1/inquiry', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({contact: contact, topic: topicEl.value, message: message})
+      body: JSON.stringify({contact: contact, topic: topicEl.value, message: message,
+                            cohort: cohortTag()})
     }).then(function(response){
       return response.json().then(function(body){ return {ok: response.ok, body: body}; })
         .catch(function(){ return {ok: false, body: {}}; });

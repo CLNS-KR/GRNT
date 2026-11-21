@@ -29,7 +29,7 @@ def read(relative):
 class VersionSyncTest(unittest.TestCase):
     def test_version_shape(self):
         self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
-        self.assertEqual(__version__, "0.4.3")
+        self.assertEqual(__version__, "0.4.4")
 
     def test_server_json_matches_version_py(self):
         manifest = json.loads(read("server.json"))
