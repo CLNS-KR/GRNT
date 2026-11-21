@@ -2092,7 +2092,7 @@ def json_ld_blocks(guide: Dict[str, Any], canonical: str) -> List[Dict[str, Any]
 
 def _page(title: str, description: str, body: str, canonical_path: str,
           json_ld: Optional[List[Dict[str, Any]]] = None) -> str:
-    from . import site_verification, static_files
+    from . import legal, site_verification, static_files
     from .web_ui import BASE_CSS
 
     root = static_files.base_url()
@@ -2142,7 +2142,8 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 <p class="foot"><strong>확인 안내</strong> — {DISCLAIMER_KO} 이 페이지는 확인 항목을 정리한
 안내이며 수급 자격을 확정하지 않습니다. 금액·기준은 해마다 공고로 바뀝니다.<br>
 출처: 행정안전부 보조금24(15113968) · 창업진흥원 K-Startup(15125364) ·
-중소벤처기업부 기업마당(15157820, 출처표시·변경금지). 입력값은 저장하지 않습니다.</p>
+중소벤처기업부 기업마당(15157820, 출처표시·변경금지). 입력값은 저장하지 않습니다.<br>
+{legal.landing_footer_html()}</p>
 </div>
 </body>
 </html>

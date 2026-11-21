@@ -391,7 +391,9 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
                 return
             try:
                 if path in ("/", "/index.html"):
-                    self._send_html(200, render_page(catalog.meta))
+                    # 홈의 건수는 카탈로그 배열에서 낸 값(캐시)을 쓴다 — 산출물 meta 의 옛
+                    # stats 를 그대로 읽으면 /llms.txt·/healthz 와 다른 수를 말하게 된다.
+                    self._send_html(200, render_page({**catalog.meta, "stats": catalog.stats()}))
                 elif path in ("/s", "/s/"):
                     self._send_html(200, pseo.render_index(catalog), cache="public, max-age=600")
                 elif path.startswith("/s/"):

@@ -52,7 +52,10 @@ def _now() -> str:
 
 def _catalog_block(catalog: Catalog) -> Dict[str, Any]:
     meta = catalog.meta
-    stats = meta.get("stats") or catalog.stats()
+    # `meta.stats` 는 동기화 산출물에 적힌 값이다. 지자체 포털 병합 뒤 재계산되지 않은
+    # 옛 파일에서는 홈·/v1/meta(12,429)와 /llms.txt·/healthz(13,416)가 갈렸다.
+    # 배열(SQLite 색인 포함)에서 낸 값이 항상 맞으므로 그것을 싣는다(한 번 계산 후 캐시).
+    stats = catalog.stats() or (meta.get("stats") or {})
     return {
         "catalog_state": meta.get("catalog_state", "sample"),
         "data_state": meta.get("data_state", "sample"),

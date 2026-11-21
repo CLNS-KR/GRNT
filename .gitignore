@@ -1,6 +1,12 @@
 __pycache__/
 *.pyc
+
+# 비밀값 — 환경 파일·키·인증서는 커밋하지 않는다(예시는 .env.example 한 장만).
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 .private-terms
 
 # 동기화 산출물·캐시는 커밋하지 않는다.

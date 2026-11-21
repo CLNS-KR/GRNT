@@ -106,13 +106,36 @@ class RefreshCatalogTest(unittest.TestCase):
         self.assertEqual(report["index"]["open_total"], 2)
         self.assertTrue(os.path.exists(self._path("catalog.json.gz")))
 
-    def test_gzip_matches_catalog_json(self):
+    def test_gzip_carries_the_same_rows_as_catalog_json(self):
+        """압축본은 원본과 **같은 행**을 담는다. meta 통계만 행 배열에서 다시 계산된다.
+
+        (0.4.8) 지자체 포털 병합 뒤 재계산되지 않은 `meta.stats` 가 남은 산출물을 그대로
+        다시 쓰지 않도록 refresh 가 쓰기 직전에 통계를 맞춘다 — 그래서 meta 만 달라질 수 있다.
+        """
         self._write_catalog()
         refresh_catalog.refresh(data_dir=self.root, offline=True, log=lambda _m: None)
         with open(self._path("catalog.json"), "rb") as handle:
-            raw = handle.read()
+            original = json.loads(handle.read().decode("utf-8"))
         with gzip.open(self._path("catalog.json.gz"), "rb") as handle:
-            self.assertEqual(handle.read(), raw)
+            written = json.loads(handle.read().decode("utf-8"))
+        self.assertEqual(original["services"], written["services"])
+        self.assertEqual(written["meta"]["stats"]["services"], len(self.rows))
+        self.assertEqual(written["meta"]["tracks"], written["meta"]["stats"]["by_track"])
+
+    def test_stale_meta_stats_are_corrected_on_write(self):
+        """홈은 12,429건, llms.txt 는 13,416건처럼 갈리던 옛 meta 값을 쓰기 직전에 고친다."""
+        payload = self._write_catalog()
+        payload["meta"]["stats"] = {"services": 1, "personal": 1, "business": 0}
+        payload["meta"]["tracks"] = {"personal": 1, "business": 0}
+        with open(self._path("catalog.json"), "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+        report = refresh_catalog.refresh(data_dir=self.root, offline=True, log=lambda _m: None)
+        self.assertTrue(report["changes"]["gzip_changed"])
+        self.assertEqual(report["catalog"]["services"], len(self.rows))
+        with gzip.open(self._path("catalog.json.gz"), "rb") as handle:
+            written = json.loads(handle.read().decode("utf-8"))
+        self.assertEqual(written["meta"]["stats"]["services"], len(self.rows))
+        self.assertEqual(written["meta"]["tracks"], written["meta"]["stats"]["by_track"])
 
     def test_rerun_reports_no_change(self):
         self._write_catalog()

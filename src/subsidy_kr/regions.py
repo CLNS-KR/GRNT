@@ -759,7 +759,7 @@ def json_ld_blocks(title: str, description: str, canonical: str,
 
 def _page(title: str, description: str, body: str, canonical_path: str,
           blocks: List[Dict[str, Any]]) -> str:
-    from . import site_verification, static_files
+    from . import legal, site_verification, static_files
     from .web_ui import BASE_CSS
 
     root = static_files.base_url()
@@ -784,7 +784,11 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 <meta property="og:description" content="{_esc(description)}">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:url" content="{canonical}">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="{root}/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="GRNT — 시·도별 지원금(지역 공고 수·분야 분포·마감 임박)">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="{canonical}">
 {scripts}
 <style>{BASE_CSS}{PAGE_HEAD_CSS}{REGION_CSS}</style>
@@ -807,7 +811,8 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 않습니다. 금액·기한·요건은 공고 원문으로 확인하세요. 최종 수급·선정 여부는 소관기관 심사로
 결정됩니다. 입력값은 저장하지 않습니다.<br>
 출처: 행정안전부 보조금24(15113968) · 창업진흥원 K-Startup(15125364) ·
-중소벤처기업부 기업마당(15157820, 출처표시·변경금지)</p>
+중소벤처기업부 기업마당(15157820, 출처표시·변경금지)<br>
+{legal.landing_footer_html()}</p>
 </div>
 </body>
 </html>

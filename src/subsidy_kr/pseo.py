@@ -227,7 +227,7 @@ def json_ld_blocks(page: Dict[str, Any], canonical: str, services: List[Any],
 def _page(title: str, description: str, body: str, *, heading: str, noindex: bool = False,
           canonical_path: str = "/s/",
           json_ld: Optional[List[Dict[str, Any]]] = None) -> str:
-    from . import static_files
+    from . import legal, static_files
     from .web_ui import BASE_CSS
 
     robots = "noindex,follow" if noindex else "index,follow"
@@ -271,7 +271,8 @@ def _page(title: str, description: str, body: str, *, heading: str, noindex: boo
 </header>
 {body}
 <p class="foot">공개 데이터(정부24 보조금24 자격 코드 · 창업진흥원 K-Startup · 중소벤처기업부 기업마당 공고 기반 사전 점검입니다. 금액·기한은 소관기관 원문을
-확인하세요. 최종 수급·선정 여부는 소관기관 심사로 결정됩니다.</p>
+확인하세요. 최종 수급·선정 여부는 소관기관 심사로 결정됩니다.<br>
+{legal.landing_footer_html()}</p>
 </div>
 </body>
 </html>

@@ -46,7 +46,7 @@ from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import programs, snapshots, sync_gov24
-from .catalog import normalize_service, read_catalog_payload
+from .catalog import normalize_service, read_catalog_payload, stats_from_rows
 from .sqlite_store import build_sqlite_from_rows
 
 CATALOG_FILE = "catalog.json"
@@ -215,6 +215,15 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
         }
 
     rows = payload.get("services") or []
+    # meta.stats·meta.tracks 를 **행 배열과 다시 맞춘다**. 재수집이 실패해 기존 카탈로그로
+    # 끝난 실행(CI 에 키가 없을 때의 --offline 포함)이 병합 뒤 건수와 어긋난 옛 값을
+    # 압축본에 그대로 다시 쓰던 문제를 막는다(지자체 포털 병합 뒤 홈 12,429 vs llms 13,416).
+    if rows:
+        stats = stats_from_rows(rows)
+        meta = dict(payload.get("meta") or {})
+        meta["stats"] = stats
+        meta["tracks"] = stats["by_track"]
+        payload["meta"] = meta
     result: Dict[str, Any] = {
         "ok": True,
         "state": "refreshed" if sync_report.get("ok") else "index_only",

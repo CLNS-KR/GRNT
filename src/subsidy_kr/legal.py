@@ -300,3 +300,17 @@ def footer_links_html() -> str:
     """홈 푸터에 붙는 고지 링크 묶음."""
     items = " · ".join(f'<a href="/{slug}">{title}</a>' for slug, title in TITLES.items())
     return f'<span class="legal-links">{items}</span>'
+
+
+def landing_footer_html() -> str:
+    """SEO 랜딩(`/s/*`·`/regions/*`·`/guides/*`) 푸터에 붙는 고지 + 자매 서비스 한 줄.
+
+    랜딩 페이지는 검색·AI 로 직접 들어오는 첫 화면이라, 홈까지 돌아가지 않아도
+    법적 고지 3장과 같이 쓰는 서비스로 이어져야 한다. 외부 링크는 새 탭 + `noopener`.
+    """
+    siblings = " · ".join(
+        f'<a href="{url}" target="_blank" rel="noopener noreferrer">{name}</a> {note}'
+        for url, name, note in SIBLINGS
+    )
+    return (f'{footer_links_html()}<br>'
+            f'같이 쓰는 서비스 — {siblings}')

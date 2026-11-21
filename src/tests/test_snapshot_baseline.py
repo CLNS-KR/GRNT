@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from datetime import date
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -94,7 +95,10 @@ class SnapshotBaselineTest(unittest.TestCase):
     def test_tool_envelope_for_baseline_only(self):
         snapshots.write_snapshot(self.services, "2026-11-19", self.dir)
         catalog = Catalog(self.services, {})
-        out = api.call_tool("compare_ledgers", {}, catalog)
+        # 이 툴은 `SUBSIDY_KR_DATA` 아래 snapshots/ 를 읽는다 — 작업 트리의 기준일 스냅샷
+        # 수에 기대지 않도록 검사용 디렉터리를 명시한다.
+        with mock.patch.dict(os.environ, {"SUBSIDY_KR_DATA": self.root}):
+            out = api.call_tool("compare_ledgers", {}, catalog)
         self.assertTrue(out["ok"])
         self.assertEqual(out["result"]["state"], "baseline_only")
         self.assertIn("기준일", out["result"]["summary_ko"])

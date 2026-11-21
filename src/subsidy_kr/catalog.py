@@ -649,6 +649,33 @@ def data_dir_from_env(default: Optional[str] = None) -> str:
     return os.path.join(project_root, "data", "gov24")
 
 
+def stats_from_rows(rows: List[Any]) -> Dict[str, Any]:
+    """동기화 산출물의 **행 배열 자체**에서 통계·트랙을 다시 계산한다.
+
+    `meta.stats` 를 저장값으로 믿으면, 지자체 자체 포털처럼 나중에 행을 더하는 단계를
+    거친 카탈로그에서 홈·`/v1/meta`(메타 값)와 `/llms.txt`·`/healthz`(배열에서 계산)가
+    서로 다른 건수를 말하게 된다. 쓰기 직전에 이 함수로 한 번 더 맞춘다.
+
+    딕셔너리 행은 `sync_all` 과 같은 규칙으로 정규화한다(서비스ID 중복은 마지막 행,
+    `source` 는 행이 스스로 밝힌 값 — 없으면 gov24). 이미 `Service` 인 항목은 그대로 센다.
+    """
+    by_id: Dict[str, Any] = {}
+    for row in rows:
+        if isinstance(row, Service):
+            if row.service_id:
+                by_id[row.service_id] = row
+            continue
+        if not isinstance(row, dict):
+            continue
+        service_id = str(row.get("서비스ID") or "").strip()
+        if service_id:
+            by_id[service_id] = row
+    services = [row if isinstance(row, Service)
+                else normalize_service(row, source=str(row.get("source") or "gov24"))
+                for row in by_id.values()]
+    return Catalog(services, {}).stats()
+
+
 def sample_catalog() -> Catalog:
     meta = sample_data.meta()
     meta.update(sample_programs.meta())

@@ -538,7 +538,10 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
     normalized = [catalog_module.normalize_service(row, source=str(row.get("source") or "gov24"))
                   for row in merged]
     cat = catalog_module.Catalog(normalized, {})
-    stats = cat.stats()
+    # 통계·트렉은 **모든 병합이 끝난 배열**에서 낸다(보조금24 → K-Startup·기업마당 →
+    # 지자체 자체 포털 local_portal). 지자체 행을 더하기 전 값을 meta 에 남기면
+    # 홈·/v1/meta 는 12,429건, /llms.txt·/healthz 는 13,416건으로 갈린다(0.4.5 실제).
+    stats = catalog_module.stats_from_rows(normalized)
     day = now_iso()[:10]
     payload = {
         "meta": {

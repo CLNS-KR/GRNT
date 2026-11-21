@@ -207,11 +207,16 @@ class SyncAllTest(unittest.TestCase):
         finally:
             local_portals.collect_all_local_portals = original
         with open(os.path.join(self.tmp, "catalog.json"), encoding="utf-8") as handle:
-            ids = {row["서비스ID"] for row in json.load(handle)["services"]}
+            payload = json.load(handle)
+        ids = {row["서비스ID"] for row in payload["services"]}
         self.assertIn("BOKJION-2", ids)      # 새로 받은 포털은 교체
         self.assertNotIn("BOKJION-1", ids)
         self.assertIn("SEOULWIS-1", ids)     # 0건이었던 포털은 기존 유지
         self.assertIn("SEOULWIS", report["sources"]["local_portal"]["counts"]["kept_from_previous"])
+        # 지자체 포털을 병합한 뒤의 배열과 meta 통계·트랙이 같아야 한다(0.4.8).
+        self.assertEqual(payload["meta"]["stats"]["services"], len(payload["services"]))
+        self.assertEqual(payload["meta"]["tracks"], payload["meta"]["stats"]["by_track"])
+        self.assertEqual(report["stats"]["services"], len(payload["services"]))
 
     def test_second_run_reports_changes(self):
         sync_gov24.sync_all("TESTKEY", data_dir=self.tmp, force=True)

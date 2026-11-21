@@ -78,6 +78,20 @@ Sitemap: {root}/sitemap.xml
 """
 
 
+def _siblings_block() -> str:
+    """llms.txt 의 자매 서비스 절 — 주소·설명은 `legal.SIBLINGS` 한 곳에서 온다."""
+    from . import legal
+
+    lines = ["## 같이 쓰는 서비스 (같은 운영자의 무료 도구)"]
+    for url, name, note in legal.SIBLINGS:
+        lines.append(f"- [{name}]({url}) — {note}.")
+    lines.append(
+        "GRNT에서 지원금을 찾은 뒤 실제로 사업을 시작할 때는 CLNS(수입·유통 규제)·"
+        "FRNC(프랜차이즈 창업)를 같이 쓰면, 근거·출처를 함께 내고 확정 판정을 하지 않는 "
+        "같은 원칙으로 이어집니다.")
+    return "\n".join(lines)
+
+
 def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> str:
     from . import guides
 
@@ -90,6 +104,7 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
     tool_count = len(mcp_tools())
     guide_count = guides.GUIDE_COUNT
     guides_section = guides.llms_section(catalog, base=root)
+    siblings_block = _siblings_block()
     data_line = (
         f"> 카탈로그: {state} · 제도 {stats.get('services', 0):,}건"
         f"(개인·가구 {stats.get('personal', 0):,} · 창업·기업 {stats.get('business', 0):,}) · "
@@ -125,6 +140,8 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
   한 줄 기준·확인 조건·지금 열린 공고·흔한 오해를 붙인 페이지. FAQPage 구조화 데이터 포함.
 - [서비스·데이터 상태]({root}/v1/meta): 카탈로그 상태, 판정 등급 정의, 두 트랙·자격 코드·출처.
 - [익명 사용 통계]({root}/v1/stats): IP·쿠키·프로필을 저장하지 않은 일별 호출 수와, 결과가 0건이었던 검색어(지역명·연락처·숫자를 지운 30자 이내) 상위 목록.
+
+{siblings_block}
 
 ## 기계용 (MCP · JSON-RPC 2.0)
 - [MCP 엔드포인트]({root}/mcp): POST. `initialize` → `tools/list` → `tools/call`. 인증 불필요,
@@ -187,9 +204,14 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
 def sitemap_xml(catalog: Catalog, base: Optional[str] = None) -> str:
     from . import guides, pseo, regions
 
+    from .version import RELEASE_DATE
+
     root = base_url(base)
-    lastmod = str(catalog.meta.get("generated_on") or catalog.meta.get("fetched_at")
-                  or "2026-11-19")[:10]
+    # 마지막 동기화일과 이 버전의 배포일 중 최신 — 템플릿·푸터·구조화 데이터가 바뀐
+    # 배포도 페이지 내용이 바뀐 것이라 lastmod 에 반영한다.
+    catalog_day = str(catalog.meta.get("generated_on") or catalog.meta.get("fetched_at")
+                      or "2026-11-19")[:10]
+    lastmod = max(catalog_day, RELEASE_DATE)
     entries = [f"""  <url>
     <loc>{root}/</loc>
     <lastmod>{lastmod}</lastmod>
