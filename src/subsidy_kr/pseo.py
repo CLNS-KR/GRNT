@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import html
+import json
 
 from .catalog import Catalog, tag_label
 from . import regions, site_verification
@@ -182,14 +183,62 @@ def indexable_paths(catalog: Catalog) -> List[str]:
     return ["/s/"] + [f"/s/{page['slug']}" for page in items(catalog) if page["indexable"]]
 
 
+def json_ld_blocks(page: Dict[str, Any], canonical: str, services: List[Any],
+                   *, root: str) -> List[Dict[str, Any]]:
+    """주제·지역 페이지 구조화 데이터 — CollectionPage + ItemList + BreadcrumbList.
+
+    AI 검색이 "이 페이지가 어떤 목록인지, 몇 건인지, 첫 항목은 무엇인지"를 읽게 한다.
+    목록 항목은 화면에 그린 순서 그대로 앞 10건만 넣는다(화면과 구조화 데이터를 맞춘다).
+    """
+    items = [
+        {"@type": "ListItem", "position": index, "name": str(svc.name),
+         "url": (svc.detail_url or svc.online_url or canonical)}
+        for index, svc in enumerate(services[:10], start=1)
+    ]
+    collection: Dict[str, Any] = {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "name": page["title"],
+        "url": canonical,
+        "description": page["intro"],
+        "inLanguage": "ko-KR",
+        "isPartOf": {"@type": "WebSite", "name": "GRNT", "url": root + "/"},
+        "publisher": {"@type": "Organization", "name": "GRNT", "url": root + "/"},
+        "mainEntity": {
+            "@type": "ItemList",
+            "numberOfItems": int(page["count"]),
+            "itemListOrder": "https://schema.org/ItemListOrderAscending",
+            "itemListElement": items,
+        },
+    }
+    breadcrumb = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "GRNT", "item": root + "/"},
+            {"@type": "ListItem", "position": 2, "name": "주제·지역별 지원금 모음",
+             "item": root + "/s/"},
+            {"@type": "ListItem", "position": 3, "name": page["title"], "item": canonical},
+        ],
+    }
+    return [collection, breadcrumb]
+
+
 def _page(title: str, description: str, body: str, *, heading: str, noindex: bool = False,
-          canonical_path: str = "/s/") -> str:
+          canonical_path: str = "/s/",
+          json_ld: Optional[List[Dict[str, Any]]] = None) -> str:
     from . import static_files
     from .web_ui import BASE_CSS
 
     robots = "noindex,follow" if noindex else "index,follow"
     canonical = static_files.base_url() + canonical_path
     esc = html.escape
+    scripts = "".join(
+        '<script type="application/ld+json">'
+        + json.dumps(block, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+        + "</script>\n"
+        for block in (json_ld or [])
+    )
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -208,7 +257,7 @@ def _page(title: str, description: str, body: str, *, heading: str, noindex: boo
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="{canonical}">
-<style>{BASE_CSS}{PAGE_CSS}</style>
+{scripts}<style>{BASE_CSS}{PAGE_CSS}</style>
 </head>
 <body>
 <div class="wrap">
@@ -267,6 +316,37 @@ def _service_rows(services: List[Any]) -> str:
     return "".join(rows)
 
 
+def _index_json_ld(pages: List[Dict[str, Any]], root: str, canonical: str) -> List[Dict[str, Any]]:
+    """`/s/` 색인 구조화 데이터 — 주제·지역 목록을 ItemList 로 담는다."""
+    items = [
+        {"@type": "ListItem", "position": index, "name": page["title"],
+         "url": f"{root}/s/{page['slug']}"}
+        for index, page in enumerate(pages[:40], start=1)
+    ]
+    collection = {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        "name": "주제·지역별 지원금 모음",
+        "url": canonical,
+        "inLanguage": "ko-KR",
+        "isPartOf": {"@type": "WebSite", "name": "GRNT", "url": root + "/"},
+        "publisher": {"@type": "Organization", "name": "GRNT", "url": root + "/"},
+        "mainEntity": {"@type": "ItemList", "numberOfItems": len(pages),
+                       "itemListOrder": "https://schema.org/ItemListUnordered",
+                       "itemListElement": items},
+    }
+    breadcrumb = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "GRNT", "item": root + "/"},
+            {"@type": "ListItem", "position": 2, "name": "주제·지역별 지원금 모음",
+             "item": canonical},
+        ],
+    }
+    return [collection, breadcrumb]
+
+
 def render_index(catalog: Catalog) -> str:
     pages = items(catalog)
     topics = [page for page in pages if page["kind"] == "topic"]
@@ -308,12 +388,16 @@ def render_index(catalog: Catalog) -> str:
   </section>
 </main>
 """
+    from . import static_files
+
+    root = static_files.base_url()
     return _page(
         "주제·지역별 정부·창업 지원금 모음 | GRNT",
         ("청년·출산·주거·구직·소상공인·창업·R&D 등 주제별, 시·도별 정부·지자체 지원금과 "
          "창업·기업 지원사업 목록·신청기한·문의처."),
         body,
         heading="주제·지역별 지원금 모음",
+        json_ld=_index_json_ld(pages, root, root + "/s/"),
     )
 
 
@@ -349,6 +433,10 @@ def render_item(slug: str, catalog: Catalog) -> Optional[str]:
   </section>
 </main>
 """
+    from . import static_files
+
+    root = static_files.base_url()
+    canonical = f"{root}/s/{slug}"
     return _page(
         f"{page['title']} \u2014 대상·금액·신청기한 총정리 (2026) | GRNT",
         f"{page['title']} {count}건의 지원대상·금액·신청기한·문의처 정리. 자격 코드 기반 사전 점검.",
@@ -356,6 +444,7 @@ def render_item(slug: str, catalog: Catalog) -> Optional[str]:
         heading=page["title"],
         noindex=noindex,
         canonical_path=f"/s/{slug}",
+        json_ld=json_ld_blocks(page, canonical, services, root=root),
     )
 
 

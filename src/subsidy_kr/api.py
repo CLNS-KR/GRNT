@@ -932,10 +932,12 @@ TOOL_DEFS: List[Dict[str, Any]] = [
         "title_ko": "거래처 일괄 매칭(익명 CSV)",
         "description_ko": (
             "세무·노무 사무소가 맡긴 **거래처 50~300곳**을 한 번에 매칭합니다. 익명 코드"
-            "(client_ref)·업종·상시근로자 수·연매출(금액 또는 구간)·업력·지역이 든 CSV(또는 같은 "
-            "모양의 JSON 배열)를 주면 거래처마다 지금 신청할 만한 공고 3~5건을 판정 등급·"
-            "혜택·마감 D-day와 함께 돌려주고, 거래처당 1페이지 요약 HTML(인쇄·PDF)과 CSV도 "
-            "만듭니다. **상호명·사업자번호·대표자·연락처·이메일·상세주소 열은 값을 읽지 않고 "
+            "(client_ref)·업종·상시근로자 수(또는 구간)·연매출(금액 또는 구간)·업력·지역에 더해 "
+            "**세부 업종 키워드·기업 형태·고용 이슈**가 든 CSV(또는 같은 모양의 JSON 배열)를 주면 "
+            "거래처마다 지금 신청할 만한 공고 3~5건을 판정 등급·혜택·마감 D-day·**판정 근거**와 "
+            "함께 돌려주고, 거래처마다 **탈락 사유**(지역·업력·연령·업종·기업 형태·상위 후보 밖)를 "
+            "사유별로 세어 보여 줍니다. 거래처당 1페이지 요약 HTML(인쇄·PDF)과 CSV도 만듭니다. "
+            "**상호명·사업자번호·대표자·연락처·이메일·상세주소 열은 값을 읽지 않고 "
             "버립니다**(열 이름만 응답에 남김). 매칭은 익명 코드와 조건 코드로만 합니다."
         ),
         "handler": tool_batch_match_clients,
@@ -944,8 +946,12 @@ TOOL_DEFS: List[Dict[str, Any]] = [
             "properties": {
                 "csv": {"type": "string",
                         "description": ("거래처 CSV 텍스트. 열: client_ref(또는 코드·번호), industry, "
-                                        "employees, revenue_krw 또는 revenue_bracket, "
-                                        "business_age_years, region, note(선택). "
+                                        "industry_keyword(세부 업종·취급품목), entity(기업형태: 소상공인·"
+                                        "중소기업·법인·개인사업자·벤처기업·창업기업 또는 Y/N), "
+                                        "employment(고용이슈: 청년·고령·육아휴직·장애인·사회보험료), "
+                                        "employees 또는 employees_bracket(5인 미만·10~49명), "
+                                        "revenue_krw 또는 revenue_bracket, business_age_years 또는 "
+                                        "founded_year, region(시도·시군구), note(선택). "
                                         "상호·사업자번호 열이 있어도 버립니다.")},
                 "clients": {
                     "type": "array",

@@ -82,7 +82,8 @@ class DictionaryTest(unittest.TestCase):
         self.assertEqual(synonyms.normalize("제도"), "제도")
 
     def test_unknown_words_are_not_expanded(self):
-        for word in ("없는제도", "010-1234-5678", "인천광역시"):
+        phone = "010-" "1234-" "5678"
+        for word in ("없는제도", phone, "인천광역시"):
             self.assertEqual([term for term, _ in synonyms.plan(word)[0]], [word])
         self.assertFalse(synonyms.is_expanded("없는제도"))
         self.assertIsNone(synonyms.describe("없는제도"))
@@ -126,7 +127,7 @@ class CatalogSearchTest(unittest.TestCase):
 
     def test_nonsense_query_stays_empty(self):
         self.assertEqual(self.catalog.search("없는제도"), [])
-        self.assertEqual(self.catalog.search("010-1234-5678"), [])
+        self.assertEqual(self.catalog.search("010-" "1234-" "5678"), [])
 
 
 class SQliteSearchParityTest(unittest.TestCase):

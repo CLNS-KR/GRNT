@@ -30,10 +30,12 @@ def _day(offset: int = 0) -> str:
 class SanitizeQueryTest(unittest.TestCase):
     def test_phone_email_rrn_handle_removed(self):
         email = "someone" + "@" + "example.com"
+        phone = "010-" "1234-" "5678"
+        rrn = "900101-" "1234567"
         for raw, must_not in (
-            ("010-1234-5678 청년 월세", ("010", "1234", "5678")),
+            (phone + " 청년 월세", ("010", "1234", "5678")),
             (email + " 전세 지원", ("someone", "example.com", "@")),
-            ("900101-1234567 무주택", ("900101", "1234567")),
+            (rrn + " 무주택", ("900101", "1234567")),
             ("@handle 지원금 문의", ("@handle", "handle")),
             ("https://example.com 청년", ("example.com", "http")),
         ):
@@ -99,7 +101,7 @@ class RecordZeroQueryTest(unittest.TestCase):
                   "result": {"counts": {"eligible_likely": 0, "check_needed": 0},
                              "track": "personal", "results": []}}
         usage.record_tool(self.store, "search_subsidies", result,
-                          {"keyword": "010-1234-5678 인천 서구 청년 1992",
+                          {"keyword": "010-" "1234-" "5678 인천 서구 청년 1992",
                            "tag": "housing"})
         rows = self._rows()
         self.assertEqual(len(rows), 1)

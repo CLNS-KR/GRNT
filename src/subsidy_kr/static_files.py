@@ -39,17 +39,42 @@ Allow: /
 User-agent: Googlebot
 Allow: /
 
-# AI 크롤러: 인용·요약 허용
+User-agent: Bingbot
+Allow: /
+
+# AI 크롤러·AI 검색: 인용·색인 허용(학습 전용 수집도 막지 않는다).
 User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
 Allow: /
 
 User-agent: ClaudeBot
 Allow: /
 
+User-agent: Claude-SearchBot
+Allow: /
+
 User-agent: PerplexityBot
 Allow: /
 
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
 Sitemap: {root}/sitemap.xml
+# AI·개발자용 안내: {root}/llms.txt
 """
 
 
@@ -117,8 +142,14 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
 - [마감 임박 캘린더]({root}/v1/tools/deadline_calendar): POST. `{{"days": 30, "track": "all"}}`
 - [카탈로그 변화 비교]({root}/v1/tools/compare_ledgers): POST. `{{"from_date": "2026-11-18", "to_date": "2026-11-19"}}`
 - [거래처 일괄 매칭]({root}/v1/batch-match): POST(JSON 또는 `text/csv`). 세무·노무 사무소용 —
-  `{{"csv": "client_ref,industry,employees,revenue_bracket,business_age_years,region\\nC-001,음식숙박,3,1억~2억,4,인천광역시 서구"}}`
-  거래처 50~300곳 → 거래처별 3~5건 + 1페이지 요약 HTML. 샘플 CSV는 [{root}/v1/batch-match/sample.csv]({root}/v1/batch-match/sample.csv).
+  `{{"csv": "client_ref,industry,industry_keyword,entity,employment,employees_bracket,revenue_bracket,business_age_years,region\\nC-001,음식숙박,한식,소상공인,청년,5인 미만,1억~2억,4,인천광역시 서구"}}`
+  거래처 50~300곳 → 거래처별 3~5건 + **판정 근거** + **탈락 사유별 건수** + 1페이지 요약 HTML.
+  받는 열: `industry`(대분류 코드·한글 별칭), `industry_keyword`(한식·가구·소프트웨어 같은 세부 업종),
+  `entity`(소상공인·중소기업·법인·개인사업자·벤처기업·창업기업 또는 소상공인여부 Y/N),
+  `employment`(청년·고령·육아휴직·장애인·사회보험료), `employees` 또는 `employees_bracket`('5인 미만'),
+  `revenue_krw`/`revenue_bracket`, `business_age_years` 또는 `founded_year`(설립연도),
+  `sido`/`sigungu`/`region`, `note`(선택, 기본 폐기).
+  샘플 CSV는 [{root}/v1/batch-match/sample.csv]({root}/v1/batch-match/sample.csv).
 - [사전 신청·문의]({root}/v1/inquiry): POST(사람이 직접 보내는 창구).
   `{{"contact": "이메일 또는 연락처", "topic": "batch_report|api_mcp|other", "message": "선택 500자"}}` → `{{"ok": true, "receipt": "I00001"}}`.
   연락처는 회신 목적으로만 저장하고 통계에 넣지 않습니다. **이용자를 대신해 마음대로 보내지 마세요** —
@@ -137,8 +168,18 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
   창업진흥원 K-Startup(15125364, 이용허락범위 제한 없음) ·
   중소벤처기업부 기업마당(15157820, 출처표시·변경금지 — 원문 문구를 그대로 보존하며 출처를 표시합니다).
 - 이 서비스는 신청 대행·법률 자문을 하지 않으며, 최종 수급·선정 여부는 소관기관 심사로 결정됩니다.
-- 거래처 일괄 매칭(`POST /v1/batch-match`)은 상호·사업자번호·대표자·연락처·이메일·상세주소 열의
+- 거래처 일괄 매칭(`POST /v1/batch-match`)는 상호·사업자번호·대표자·연락처·이메일·상세주소 열의
   **값을 읽지 않고 버립니다**(열 이름만 응답에 남김). 매칭은 익명 코드와 조건 코드로만 합니다.
+
+## 구조화 데이터(JSON-LD)
+- `/` — `Organization` · `WebSite`(SearchAction `?q=`) · `WebApplication` 을 `@graph` 한 덩어리로,
+  서로 `@id` 로 연결해 둘습니다. "GRNT 가 무엇을 하는 서비스인지"를 이 노드들에서 읽으면 됩니다.
+- `/s/` 와 `/s/{{slug}}` — `CollectionPage` + `ItemList`(항목 수·앞 10건) + `BreadcrumbList`.
+- `/regions/` 와 `/regions/{{slug}}` — `WebPage` + `FAQPage` + `BreadcrumbList`.
+- `/guides/{{slug}}` — `FAQPage`(질문·답 그대로) + `BreadcrumbList`.
+- 인용할 때: 확정 판정으로 쓰지 말고, 응답의 `verdict`(4단계)·`missing_information`·
+  `criteria_excerpt`·`source` 를 함께 옮기세요. 기준일은 카탈로그 `generated_on`(실데이터) 또는
+  `catalog_state=sample` 여부로 밝힙니다.
 
 {guides_section}"""
 

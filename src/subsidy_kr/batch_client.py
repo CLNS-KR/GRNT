@@ -33,6 +33,22 @@
 
 읽는 값의 근거는 `agent_report` 와 같습니다(「소상공인기본법」 제2조·시행령 제3조,
 「중소기업기본법 시행령」 별표 3). 규모 판정은 **추정**이고, 확정은 확인서로 합니다.
+
+1.1 — 세무·노무 담당의 실제 파일에 맞춘 정교화
+--------------------------------------------
+사무소 파일에는 상시근로자 '수'보다 **구간**(5인 미만·10인 이상), 업종 '대분류'보다
+**세부 업종**(한식·가구·소프트웨어), 그리고 **고용 이슈**(청년 채용·육아휴직 대체인력·
+고령자·장애인·사회보험료)가 적혀 있는 경우가 많습니다. 1.1 은 그 세 가지와
+**기업 형태**(소상공인·중소기업·법인 등)를 조건으로 받아
+
+- 매칭 점수에 고용 이슈·세부 업종 가점을 넣고,
+- 거래처마다 **탈락 사유**(지역·업력·연령·업종·기업 형태·상위 후보 밖)를 사유별로 세어
+  왜 그 공고가 빠졌는지 보여 주고,
+- 결과 1건마다 **판정 근거 문구**(지역 일치/업력 충족/업종 충족, 확인이 필요한 항목)를 붙입니다.
+
+고용 이슈 문구는 '고령'(→ 고령군 같은 지역명)·'청년'(→ 청년창업센터 같은 창업 지원)처럼
+혼동되는 낱말을 피하고, **고용 지원을 뜻하는 결합 표현**(청년일자리·시니어인턴십·육아휴직
+대체인력 등)만 골라 잡습니다.
 """
 from __future__ import annotations
 
@@ -47,7 +63,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from . import agent_report, engine, programs, regions
 from .catalog import Catalog
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 MAX_CLIENTS = 300
 MIN_CLIENTS_HINT = 50
@@ -75,6 +91,19 @@ SCOPE_LIMITS_KO = [
 
 ANONYMITY_BADGE_KO = "상호명·사업자번호는 서버 매칭에 쓰지 않고 조건 코드만 처리합니다"
 
+# 열 이름과 허용 값을 사람에게 그대로 보여 준다 — 사무소 파일의 열 이름이 제각각이기 때문이다.
+CONDITION_GUIDE_KO: List[str] = [
+    "업종: 대분류 코드(manufacturing·retail·food·ict·service·construction·logistics·agri·"
+    "education·health·culture·energy·finance) 또는 한글 별칭(음식숙박·제조·도소매 등).",
+    "업종키워드: 취급 품목·업태(한식, 가구, 소프트웨어, 미용 등). 알아본 낱말만 점수에 쓰고, "
+    "업종이 비어 있으면 대분류를 채웁니다.",
+    "직원수구간: '5인 미만'·'5~9명'·'10명 이상' 같은 구간. 상시근로자 수 열이 없을 때 씁니다.",
+    "기업형태: 소상공인·중소기업·법인·개인사업자·벤처기업·사회적기업·창업기업 또는 "
+    "Y/N(소상공인여부 — Y=소상공인, N=중소기업).",
+    "고용이슈: 청년·고령(중장년)·육아휴직·장애인·사회보험료를 쉼표로 구분(청년, 육아휴직).",
+    "설립연도: 업력 열이 없을 때 설립연도로 연차를 계산합니다(개월 단위 미반영).",
+]
+
 # --- 열 이름 ---------------------------------------------------------------
 # 헤더는 공백·밑줄·하이픈을 지우고 소문자로 맞춰 비교한다(엑셀에서 그대로 저장한 머리글도 읽는다).
 _KIND = {
@@ -87,11 +116,20 @@ _KIND = {
                     "매출액", "연매출액", "매출"),
     "revenue_bracket": ("revenuebracket", "매출구간", "연매출구간", "매출액구간"),
     "business_age_years": ("businessageyears", "bizyears", "years", "업력",
-                           "업력년", "업력년수", "창업후년수", "사업기간"),
+                           "업력년", "업력년수", "창업후년수", "사업기간", "창업연차",
+                           "업력년차", "창업년차"),
     "region": ("region", "지역", "소재지", "시도시군구", "사업장지역", "사업장소재지"),
     "sido": ("sido", "시도", "광역"),
     "sigungu": ("sigungu", "시군구", "구군"),
     "age": ("age", "대표나이", "대표자나이", "만나이"),
+    "employees_bracket": ("employeesbracket", "직원수구간", "상시근로자구간", "근로자구간",
+                          "인원구간", "직원수범위"),
+    "entity": ("entity", "bizentity", "기업형태", "사업자형태", "기업구분", "법인구분",
+               "기업유형", "규모구분", "소상공인여부", "중소기업여부", "법인여부"),
+    "industry_keyword": ("industrykeyword", "업종키워드", "세부업종", "업종상세", "업종상세명",
+                         "취급품목", "주요품목"),
+    "employment": ("employment", "고용이슈", "인력이슈", "채용이슈", "고용상황", "노무이슈"),
+    "founded_year": ("foundedyear", "설립연도", "창업연도", "개업연도"),
     "note": ("note", "notes", "비고", "메모", "라벨", "label", "참고"),
 }
 
@@ -278,20 +316,234 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
+# --- 직원 수 구간 ----------------------------------------------------------
+# 사무소 파일은 정확한 인원 대신 '5인 미만'·'10~49명'처럼 구간을 적는다.
+# 소상공인 요건은 '미만'이 핵심이므로, 구간의 **위쪽 값**을 써서 넘지 않게 판정하고
+# '10인 이상'처럼 위가 열린 구간만 아래쪽 값을 쓰고 그 사실을 note 로 남깁니다.
+def parse_employees_bracket(value: Any) -> Tuple[Optional[int], str]:
+    """'5인 미만'·'5~9명'·'10명 이상' → (상시근로자 수, 판정 근거 문구)."""
+    text = str(value or "").strip().replace("명", "").replace("인", "")
+    if not text:
+        return None, ""
+    compact = re.sub(r"[\s,]", "", text)
+    numbers = [int(match) for match in re.findall(r"\d+", compact)]
+    if not numbers:
+        return None, ""
+    if any(word in compact for word in ("미만", "이하", "under", "below")):
+        upper = numbers[-1]
+        if "이하" in compact:
+            return upper, "구간 상한(이하)으로 판정"
+        return max(0, upper - 1), "구간 상한(미만)으로 판정"
+    if len(numbers) >= 2:
+        return numbers[-1], "구간 상한으로 판정"
+    if any(word in compact for word in ("이상", "초과", "over")):
+        return numbers[0], "위가 열린 구간이라 하한으로 판정"
+    return numbers[0], ""
+
+
+# --- 기업 형태 -------------------------------------------------------------
+_ENTITY_INPUT_ALIASES: Dict[str, str] = {
+    "소상공인": "small_business", "소상공인임": "small_business", "자영업": "small_business",
+    "개인사업자": "sole_proprietor", "개인": "sole_proprietor",
+    "중소기업": "sme", "중견기업": "sme", "일반기업": "sme",
+    "법인": "corporate", "주식회사": "corporate", "법인사업자": "corporate",
+    "벤처기업": "venture", "벤처": "venture", "이노비즈": "venture",
+    "사회적기업": "social_enterprise", "사회적협동조합": "social_enterprise",
+    "예비창업자": "pre_startup", "예비창업": "pre_startup",
+    "창업기업": "startup", "스타트업": "startup", "초기창업기업": "startup",
+    "y": "small_business", "yes": "small_business", "o": "small_business",
+    "예": "small_business", "true": "small_business", "1": "small_business",
+    "n": "sme", "no": "sme", "아니오": "sme", "false": "sme", "0": "sme",
+}
+
+
+def resolve_entity(value: Any) -> Optional[str]:
+    """기업 형태 입력(한국어·코드·Y/N)을 엔진 코드로 바꿉니다.
+
+    '소상공인여부' 열이 Y/N 으로만 적혀 있어도 읽습니다(Y=소상공인, N=중소기업).
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text in programs.BUSINESS_ENTITIES:
+        return text
+    compact = re.sub(r"[\s·ㆍ\-_\(\)]+", "", text).lower()
+    if not compact:
+        return None
+    if compact in programs.BUSINESS_ENTITIES:
+        return compact
+    return _ENTITY_INPUT_ALIASES.get(compact)
+
+
+def _entity_for_engine(entity: Optional[str]) -> Optional[str]:
+    """기업 형태를 엔진이 읽는 코드로 옮긴다 — '창업기업'은 중소기업 범주로 본다.
+
+    엔진은 "기업 형태가 중소기업이면 창업기업 요건을 통과"로 판정하지만, 반대 방향
+    (창업기업으로 입력 → 중소기업 요건)은 통과시키지 않습니다. 창업기업은 법상 중소기업의
+    부분집합이므로, '창업기업'을 그대로 넘기면 중소기업 대상 공고가 통째로 빠집니다.
+    표시는 '창업기업'으로 두고 판정만 중소기업으로 합니다(업력 요건은 따로 판정됩니다).
+    """
+    if entity == "startup":
+        return "sme"
+    return entity
+
+
+# --- 고용 이슈 -------------------------------------------------------------
+# 노무 담당이 거래처별로 아는 고용 상황. 공고 문구에서 **고용 지원을 뜻하는 결합 표현만**
+# 골라 잡습니다 — '고령'만 보면 '고령군'(지역명), '청년'만 보면 '청년창업지원센터'까지 걸립니다.
+EMPLOYMENT_ISSUES: List[Tuple[str, str, Tuple[str, ...]]] = [
+    ("youth", "청년 채용",
+     ("청년일자리", "청년 일자리", "청년고용", "청년 고용", "청년채용", "청년 채용",
+      "청년장려금", "청년 장려금", "일자리도약", "청년취업", "청년 취업")),
+    ("senior", "고령·중장년", ("고령자", "시니어", "중장년", "신중년")),
+    ("parental_leave", "육아휴직·대체인력", ("육아휴직", "출산휴가", "대체인력")),
+    ("disabled", "장애인 고용", ("장애인 고용", "장애인고용", "장애인 의무고용", "중증장애인",
+                              "장애인 근로자")),
+    ("social_insurance", "사회보험료", ("두루누리", "사회보험료", "4대보험료", "고용보험료")),
+]
+
+EMPLOYMENT_LABELS_KO: Dict[str, str] = {code: label for code, label, _ in EMPLOYMENT_ISSUES}
+
+_EMPLOYMENT_INPUT_ALIASES: Dict[str, str] = {
+    "청년": "youth", "청년채용": "youth", "청년고용": "youth", "청년일자리": "youth",
+    "youth": "youth",
+    "고령": "senior", "고령자": "senior", "시니어": "senior", "중장년": "senior",
+    "신중년": "senior", "senior": "senior", "middle_aged": "senior",
+    "육아휴직": "parental_leave", "출산휴가": "parental_leave", "대체인력": "parental_leave",
+    "parental_leave": "parental_leave", "leave": "parental_leave",
+    "장애인": "disabled", "장애인고용": "disabled", "장애": "disabled", "disabled": "disabled",
+    "사회보험": "social_insurance", "사회보험료": "social_insurance", "두루누리": "social_insurance",
+    "4대보험": "social_insurance", "social_insurance": "social_insurance",
+}
+
+
+def _compact_text(value: Any) -> str:
+    return re.sub(r"[\s·ㆍ\-_/]+", "", str(value or ""))
+
+
+def employment_codes(text: Any) -> frozenset:
+    """공고 문구에서 고용 이슈를 뽑는다 — 결합 표현만 인정한다.
+
+    '고령군 2026년 고령친화산업'이나 '송파ICT청년창업지원센터'는 고용 지원 공고가 아니므로
+    '고령자'·'청년일자리' 같은 결합 표현이 있어야 잡습니다.
+    """
+    compact = _compact_text(text)
+    if not compact:
+        return frozenset()
+    found = set()
+    for code, _label, terms in EMPLOYMENT_ISSUES:
+        for term in terms:
+            if _compact_text(term) in compact:
+                found.add(code)
+                break
+    return frozenset(found)
+
+
+def _norm_employment_key(value: str) -> str:
+    return re.sub(r"[\s·ㆍ\-_]+", "", str(value or "")).lower()
+
+
+# 별칭 키를 넣는 방식과 같은 방식으로 정규화해 둔다(코드형 'social_insurance' 도 읽게).
+_EMPLOYMENT_ALIASES_NORM: Dict[str, str] = {
+    _norm_employment_key(key): value for key, value in _EMPLOYMENT_INPUT_ALIASES.items()
+}
+
+
+def parse_employment(value: Any) -> List[str]:
+    """입력 열의 고용 이슈(쉼표·슬래시 구분, 한국어/코드) → 코드 목록(중복 제거)."""
+    raw = str(value or "")
+    if not raw.strip():
+        return []
+    codes: List[str] = []
+    for token in re.split(r"[,，/;|]+", raw):
+        compact = _norm_employment_key(token)
+        if not compact:
+            continue
+        code = _EMPLOYMENT_ALIASES_NORM.get(compact)
+        if code and code not in codes:
+            codes.append(code)
+    return [code for code in EMPLOYMENT_LABELS_KO if code in codes]
+
+
+# --- 업종 세부 키워드 -------------------------------------------------------
+# '업종' 열이 대분류만 담을 때가 많아, 취급 품목·업태를 대분류와 함께 읽습니다.
+# 알아본 낱말만 쓰고(응답에 되풀이하지 않음) 매칭 점수에 반영합니다.
+INDUSTRY_KEYWORD_HINTS: List[Tuple[str, Tuple[str, ...]]] = [
+    ("food", ("한식", "중식", "일식", "양식", "분식", "카페", "커피", "제과", "베이커리",
+              "치킨", "호프", "주점", "급식", "도시락", "반찬", "식당", "음식점",
+              "푸드트럭", "케이터링", "정육", "수산", "떡", "김치")),
+    ("manufacturing", ("가구", "의류", "봉제", "섬유", "금속", "기계", "전자부품", "플라스틱",
+                       "포장재", "화학", "인쇄", "정밀가공", "식품제조", "목공", "주얼리",
+                       "한복", "3d프린팅", "반도체", "배터리", "철강")),
+    ("ict", ("소프트웨어", "sw", "앱", "웹", "인공지능", "ai", "플랫폼", "정보보안",
+             "게임", "saas", "클라우드", "데이터")),
+    ("retail", ("편의점", "마트", "슈퍼", "온라인몰", "쇼핑몰", "전자상거래", "무인매장",
+                "의류판매", "화장품판매", "농수산물판매", "중고거래")),
+    ("service", ("미용", "헤어", "네일", "세탁", "수리", "청소", "시설관리", "부동산중개",
+                 "여행사", "렌터카", "사진관", "번역", "컨설팅", "광고대행")),
+    ("education", ("학원", "교습소", "에듀", "과외", "직업훈련", "온라인강의")),
+    ("health", ("병원", "의원", "약국", "요양", "보건", "의료기기", "헬스장", "필라테스")),
+    ("construction", ("건설", "시공", "인테리어", "전기공사", "설비", "조경", "철거", "도장")),
+    ("logistics", ("물류", "택배", "운송", "화물", "창고", "배송", "퀵", "이사")),
+    ("culture", ("공연", "전시", "영상", "사진", "디자인", "예술", "관광", "공예")),
+    ("agri", ("농업", "축산", "원예", "과수", "스마트팜", "어업", "임업", "양봉")),
+    ("energy", ("태양광", "에너지", "재활용", "환경", "탄소", "폐기물", "정수기")),
+]
+
+
+def resolve_industry_keywords(value: Any) -> Tuple[List[str], List[str]]:
+    """취급 품목·업태 문구 → (업종 대분류 후보, 알아본 키워드).
+
+    알아본 키워드만 돌려줍니다. 알아보지 못한 문구는 응답에 되풀이하지 않습니다
+    (거래처 이름·상호가 섮여 들어오는 것을 피하려는 것).
+    """
+    compact = _compact_text(value).lower()
+    if not compact:
+        return [], []
+    slugs: List[str] = []
+    tokens: List[str] = []
+    for slug, words in INDUSTRY_KEYWORD_HINTS:
+        for word in words:
+            if _compact_text(word).lower() in compact:
+                if slug not in slugs:
+                    slugs.append(slug)
+                if word not in tokens and len(tokens) < 4:
+                    tokens.append(word)
+                break
+    return slugs, tokens
+
+
 # --- 클라이언트(거래처) 만들기 ---------------------------------------------
 def _client_from_codes(client_ref: str, codes: Dict[str, str], *,
                        allow_labels: bool) -> Dict[str, Any]:
     """조건 코드만으로 거래처 1곳을 만든다. 민감 정보는 애초에 전달되지 않는다."""
     errors: List[str] = []
+    notes: List[str] = []
     industry_raw = codes.get("industry", "")
     industry = resolve_industry(industry_raw) if industry_raw else None
     startup = any(word in industry_raw for word in agent_report.STARTUP_WORDS)
+
+    keyword_slugs, industry_terms = resolve_industry_keywords(codes.get("industry_keyword"))
+    if industry is None and keyword_slugs:
+        # 업종 열이 비었거나 못 읽었을 때만 세부 키워드로 대분류를 채운다.
+        industry = keyword_slugs[0]
+        notes.append(f"업종을 세부 키워드({industry_terms[0]})로 읽어 "
+                     f"{programs.INDUSTRY_LABELS.get(industry, industry)}으로 보았습니다.")
     if industry_raw and industry is None and not startup:
         errors.append(f"업종을 읽지 못했습니다({industry_raw[:12]}). 업종 코드를 확인하세요.")
 
     employees = _as_int(codes.get("employees"))
+    employees_source = "정확값" if employees is not None else ""
+    bracket_text = ""
+    if employees is None and codes.get("employees_bracket"):
+        employees, bracket_text = parse_employees_bracket(codes.get("employees_bracket"))
+        if employees is not None:
+            employees_source = "구간"
+        else:
+            errors.append("직원 수 구간을 읽지 못했습니다(예: 5인 미만, 10~49명).")
     if employees is not None and not (0 <= employees <= 100_000):
         employees = None
+        employees_source = ""
         errors.append("상시근로자 수가 범위를 벗어나 비웠습니다.")
 
     revenue = parse_money_krw(codes.get("revenue_krw"))
@@ -304,8 +556,20 @@ def _client_from_codes(client_ref: str, codes: Dict[str, str], *,
             errors.append("매출 구간을 읽지 못했습니다.")
 
     years = _as_float(codes.get("business_age_years"))
+    years_source = "업력" if years is not None else ""
+    if years is None and codes.get("founded_year"):
+        founded = _as_int(codes.get("founded_year"))
+        current = datetime.now().year
+        if founded is not None and 1900 <= founded <= current:
+            years = float(max(0, current - founded))
+            years_source = "설립연도"
+            notes.append(f"업력을 설립연도({founded}) 기준 연차로 계산했습니다"
+                         "(개월 단위는 반영하지 않음).")
+        elif founded is not None:
+            errors.append("설립연도를 읽지 못해 업력을 비웠습니다.")
     if years is not None and not (0 <= years <= 60):
         years = None
+        years_source = ""
         errors.append("업력이 범위를 벗어나 비웠습니다.")
 
     region_text = codes.get("region") or " ".join(
@@ -318,6 +582,12 @@ def _client_from_codes(client_ref: str, codes: Dict[str, str], *,
     if age is not None and not (0 <= age <= 120):
         age = None
 
+    entity = resolve_entity(codes.get("entity"))
+    if entity and str(codes.get("entity") or "").strip().lower() in ("y", "n", "yes", "no"):
+        notes.append("기업 형태 Y/N 열을 읽었습니다"
+                     f"(Y=소상공인, N=중소기업 → {'소상공인' if entity == 'small_business' else '중소기업'}).")
+    employment = parse_employment(codes.get("employment"))
+
     label = ""
     if allow_labels:
         label = str(codes.get("note") or "").strip()[:MAX_LABEL_LEN]
@@ -327,22 +597,36 @@ def _client_from_codes(client_ref: str, codes: Dict[str, str], *,
         "label": label,
         "industry": industry,
         "industry_input": industry_raw if industry is None else None,
+        "industry_terms": industry_terms,
+        "industry_keyword_slugs": keyword_slugs,
         "startup": startup,
         "employees": employees,
+        "employees_source": employees_source,
+        "employees_note_ko": bracket_text,
         "revenue_krw": revenue,
         "revenue_source": revenue_source,
         "revenue_note_ko": bracket_note,
         "business_age_years": years,
+        "years_source": years_source,
         "region": region,
         "age": age,
+        "entity": entity,
+        "employment": employment,
         "parse_errors": errors,
+        "parse_notes": notes,
     }
 
 
 def _report_args(client: Dict[str, Any], *, include_closed: bool, keyword: Optional[str]) -> Dict[str, Any]:
     """`agent_report` 가 읽는 인자 모양으로 바꾼다 — 단건 리포트와 같은 규격을 쓰기 위해서다."""
-    args: Dict[str, Any] = {"include_closed": bool(include_closed),
-                            "biz_status": "pre" if client["startup"] else "operating"}
+    declared_entity = _entity_for_engine(client.get("entity"))
+    args: Dict[str, Any] = {
+        "include_closed": bool(include_closed),
+        "biz_status": "pre" if (client["startup"] or declared_entity == "pre_startup") else "operating",
+    }
+    if declared_entity:
+        # 사무소가 확인서로 아는 기업 형태를 그대로 넘긴다(규모 추정보다 정확하다).
+        args["biz_entity"] = declared_entity
     if client["industry"]:
         args["industry"] = client["industry"]
     elif client["startup"]:
@@ -401,8 +685,10 @@ def parse_clients_csv(text: str, *, allow_labels: bool = False,
             seen[ref] = 1
         client = _client_from_codes(ref, codes, allow_labels=allow_labels)
         if not any(client[key] not in (None, "", False)
-                   for key in ("industry", "employees", "revenue_krw", "business_age_years")):
-            client["parse_errors"].append("조건 값이 없습니다(업종·근로자·매출·업력 중 하나 필요).")
+                   for key in ("industry", "employees", "revenue_krw", "business_age_years",
+                               "entity")):
+            client["parse_errors"].append(
+                "조건 값이 없습니다(업종·근로자·매출·업력·기업 형태 중 하나 필요).")
         clients.append(client)
         if len(clients) > max_clients:
             raise ValueError("too_many_clients")
@@ -485,6 +771,8 @@ def _program_index(catalog: Catalog, *, include_closed: bool = False) -> List[Di
         deadline = svc.deadline
         business = svc.business or {}
         entities = tuple(business.get("entity") or ())
+        search_text = " ".join((svc.name, svc.purpose[:400], svc.target[:400],
+                                str(svc.support_type or "")))
         cards.append({
             "svc": svc,
             "categories": categories,
@@ -500,8 +788,9 @@ def _program_index(catalog: Catalog, *, include_closed: bool = False) -> List[Di
             "min_age": business.get("min_age"),
             "max_age": business.get("max_age"),
             "gender": business.get("gender"),
-            "search_text": " ".join((svc.name, svc.purpose[:400], svc.target[:400],
-                                       str(svc.support_type or ""))),
+            # 고용 이슈(청년일자리·시니어인턴십·육아휴직 대체인력…)를 색인 때 한 번만 뽑는다.
+            "employment": employment_codes(search_text),
+            "search_text": search_text,
         })
     catalog.memo[key] = cards
     return cards
@@ -538,17 +827,77 @@ def _entity_allows(status: Optional[str], entity: Optional[str],
     return False
 
 
-def _fast_fail(card: Dict[str, Any], context: Dict[str, Any]) -> bool:
-    """정밀 판정 전 1차 필터 — 명확히 어긋난 공고만 True.
+EXCLUSION_REGION = "region"
+EXCLUSION_ENTITY = "entity"
+EXCLUSION_YEARS = "years"
+EXCLUSION_AGE = "age"
+EXCLUSION_GENDER = "gender"
+EXCLUSION_INDUSTRY = "industry"
+EXCLUSION_KEYWORD = "keyword"
+EXCLUSION_SHORTLIST = "shortlist"
+EXCLUSION_ENGINE = "engine"
+EXCLUSION_CATEGORY = "category"
 
-    `engine.structural_fail` 과 같은 판단을 문자열 생성 없이 한다(같은 결과를 테스트로 고정).
+EXCLUSION_LABELS_KO: Dict[str, str] = {
+    EXCLUSION_REGION: "지역 불일치",
+    EXCLUSION_ENTITY: "기업 형태 불일치",
+    EXCLUSION_YEARS: "업력 초과",
+    EXCLUSION_AGE: "연령 요건 불일치",
+    EXCLUSION_GENDER: "성별 요건 불일치",
+    EXCLUSION_INDUSTRY: "업종 요건 불일치",
+    EXCLUSION_KEYWORD: "검색어 불일치",
+    EXCLUSION_SHORTLIST: "상위 후보 밖(정밀 판정 생략)",
+    EXCLUSION_ENGINE: "정밀 판정 불합격",
+    EXCLUSION_CATEGORY: "관심 분야 밖",
+}
+
+EXCLUSION_ORDER: List[str] = [EXCLUSION_REGION, EXCLUSION_YEARS, EXCLUSION_AGE,
+                             EXCLUSION_ENTITY, EXCLUSION_INDUSTRY, EXCLUSION_GENDER,
+                             EXCLUSION_SHORTLIST, EXCLUSION_ENGINE, EXCLUSION_KEYWORD,
+                             EXCLUSION_CATEGORY]
+
+
+def _age_text(low: Optional[int], high: Optional[int]) -> str:
+    if low is not None and high is not None:
+        return f"만 {low}~{high}세"
+    if low is not None:
+        return f"만 {low}세 이상"
+    if high is not None:
+        return f"만 {high}세 이하"
+    return "연령 요건"
+
+
+def _requirement_text(code: str, card: Dict[str, Any]) -> str:
+    """탈락 사유의 '요건'을 짧게 — 왜 빠졌는지 한 줄로 보여 주기 위해서다."""
+    if code == EXCLUSION_REGION:
+        return " ".join(part for part in (card.get("sido"), card.get("sigungu")) if part)
+    if code == EXCLUSION_ENTITY:
+        return " · ".join(dict.fromkeys(programs.ENTITY_LABELS.get(slug, slug)
+                                       for slug in card.get("entities") or ()))
+    if code == EXCLUSION_YEARS:
+        return f"창업 {card.get('max_years')}년 이내"
+    if code == EXCLUSION_AGE:
+        return _age_text(card.get("min_age"), card.get("max_age"))
+    if code == EXCLUSION_GENDER:
+        return "여성" if card.get("gender") == "female" else "남성"
+    if code == EXCLUSION_INDUSTRY:
+        return " · ".join(dict.fromkeys(programs.INDUSTRY_LABELS.get(slug, slug)
+                                       for slug in card.get("industries") or ()))
+    return ""
+
+
+def _fast_fail_reason(card: Dict[str, Any], context: Dict[str, Any]) -> Optional[str]:
+    """정밀 판정 전 1차 필터 — 명확히 어긋난 공고의 **사유 코드**를 돌려준다(아니면 None).
+
+    `engine.structural_fail` 과 같은 순서·같은 판단을 문자열 생성 없이 한다(같은 결과를
+    테스트로 고정). 사유 코드를 돌려주므로 거래처마다 "무엇 때문에 빠졌는지"를 셀 수 있다.
     """
     level = card["level"]
     if level in ("sido", "sigungu") and context["region_level"] in ("sido", "sigungu"):
         if card["sido"] != context["sido"]:
-            return True
+            return EXCLUSION_REGION
         if level == "sigungu" and context["sigungu"] and card["sigungu"] != context["sigungu"]:
-            return True
+            return EXCLUSION_REGION
     entities = card["entities"]
     if entities:
         allowed = context["entity_cache"].get(entities)
@@ -556,31 +905,41 @@ def _fast_fail(card: Dict[str, Any], context: Dict[str, Any]) -> bool:
             allowed = _entity_allows(context["status"], context["entity"], entities)
             context["entity_cache"][entities] = allowed
         if allowed is False:
-            return True
+            return EXCLUSION_ENTITY
     max_years = card["max_years"]
     if (max_years is not None and context["status"] != "pre"
             and context["years"] is not None and context["years"] > max_years):
-        return True
+        return EXCLUSION_YEARS
     age = context["age"]
     if age is not None:
         if card["min_age"] is not None and age < card["min_age"]:
-            return True
+            return EXCLUSION_AGE
         if card["max_age"] is not None and age > card["max_age"]:
-            return True
+            return EXCLUSION_AGE
     gender = card["gender"]
     if gender in ("female", "male") and context["sex"] in ("female", "male"):
         if context["sex"] != gender:
-            return True
+            return EXCLUSION_GENDER
     if card["industry_required"] and card["industries"]:
         industry = context["industry"]
         if industry is not None and industry not in card["industries"]:
-            return True
-    return False
+            return EXCLUSION_INDUSTRY
+    return None
+
+
+def _fast_fail(card: Dict[str, Any], context: Dict[str, Any]) -> bool:
+    """정밀 판정 전 1차 필터 — 명확히 어긋난 공고만 True."""
+    return _fast_fail_reason(card, context) is not None
 
 
 def _pre_score(card: Dict[str, Any], *, size: Dict[str, Any], industry: Optional[str],
-               region: Dict[str, str]) -> int:
-    """`agent_report._priority` 에서 **판정 등급 항목만 뺀** 점수(정밀 판정 전 순위 근사)."""
+               region: Dict[str, str], employment: frozenset = frozenset(),
+               industry_terms: Tuple[str, ...] = ()) -> int:
+    """`agent_report._priority` 에서 **판정 등급 항목만 뺀** 점수(정밀 판정 전 순위 근사).
+
+    고용 이슈와 세부 업종은 판정 조건이 아니라 **순위 신호**다(공고 신청자격은 그대로 판정).
+    노무사가 "청년 채용 지원"을 찾을 때 청년일자리 공고가 상위 후보로 올라오게 한다.
+    """
     score = 0
     likely = size.get("small_business_likely")
     primary = card["primary"]
@@ -600,6 +959,22 @@ def _pre_score(card: Dict[str, Any], *, size: Dict[str, Any], industry: Optional
             score += 1
     if industry and card["industry_required"] and industry in card["industries"]:
         score += 2
+    if employment:
+        hits = card.get("employment") or frozenset()
+        matched = len(hits & employment)
+        if matched:
+            # 거래처가 "우리 고용 이슈는 이것"이라고 밝혔을 때, 그 이슈를 직접 다루는 공고를
+            # 상위로 올린다. 판정(자격)은 바꾸지 않고 순위만 올린다.
+            score += min(12, 8 * matched)
+        if primary == agent_report.CATEGORY_LABOR:
+            score += 2
+    if industry_terms:
+        text = card.get("search_text") or ""
+        found = sum(1 for term in industry_terms if term and term in text)
+        if found:
+            score += min(4, 2 + (found - 1))
+            if any(term and term in str(card["svc"].name) for term in industry_terms):
+                score += 1
     if region.get("level") == "sigungu" and card["level"] in ("sido", "sigungu"):
         score += 1
     return score
@@ -627,10 +1002,21 @@ def _shortlist(candidates: List[Tuple[int, Dict[str, Any]]], limit: int) -> List
     return picked
 
 
-def _select_top(rows: List[Dict[str, Any]], top_n: int) -> List[Dict[str, Any]]:
-    """거래처에 보낼 3~5건 — 묶음별 대표를 먼저 넣고 남은 자리는 우선순위 순으로 채운다."""
+def _select_top(rows: List[Dict[str, Any]], top_n: int, *,
+               emphasis: int = 0) -> List[Dict[str, Any]]:
+    """거래처에 보낼 3~5건 — 묶음별 대표를 먼저 넣고 남은 자리는 우선순위 순으로 채운다.
+
+    `emphasis` 는 거래처가 밝힌 고용 이슈와 맞는 공고를 앞자리에 넣는 수입니다(최대 2).
+    """
     picked: List[Dict[str, Any]] = []
     seen = set()
+    for row in rows:
+        if len(picked) >= min(2, emphasis):
+            break
+        if id(row) in seen:
+            continue
+        picked.append(row)
+        seen.add(id(row))
     for slug in agent_report.CATEGORY_ORDER:
         if len(picked) >= top_n:
             break
@@ -709,6 +1095,57 @@ def _compact_match(row: Dict[str, Any], rank: int) -> Dict[str, Any]:
         "priority": {"tier": priority.get("tier"), "tier_label_ko": priority.get("tier_label_ko"),
                      "score": priority.get("score")},
         "requirements_ko": row.get("business_summary_ko") or "",
+        "employment_hits_ko": [EMPLOYMENT_LABELS_KO[code]
+                               for code in (row.get("employment_hits") or ())
+                               if code in EMPLOYMENT_LABELS_KO],
+    }
+
+
+def _fit_block(row: Dict[str, Any], employment_hits: Iterable[str]) -> Dict[str, Any]:
+    """거래처 조건과 공고 요건이 맞물린 **근거 문구**(엔진 판정의 why 를 그대로 옮긴다).
+
+    판정을 새로 만들지 않습니다. 엔진이 남긴 규칙 중 지역·기업 형태·업력·업종·연령·성별처럼
+    거래처 조건과 직접 맞물린 것만 추리고, 정보가 없어 판정하지 못한 항목은 '확인 필요'로
+    따로 세웁니다. 300곳×5건 응답이 커지지 않도록 항목 수와 필드를 줄입니다(문장은 reasons_ko).
+    """
+    checks: List[Dict[str, str]] = []
+    reasons: List[str] = []
+    seen = set()
+    missing: List[str] = []
+    for rule in row.get("why") or []:
+        state = rule.get("state")
+        group = rule.get("group")
+        if state == "pass" and group in ("region", "business", "gender"):
+            required = str(rule.get("required") or "")
+            if not required or required == "전국":
+                continue
+            key = ("pass", group, required)
+            if key in seen:
+                continue
+            seen.add(key)
+            checks.append({"state": "pass", "key": group, "required_ko": required})
+            if len(reasons) < 4:
+                reasons.append(str(rule.get("reason_ko") or ""))
+        elif state == "unknown" and rule.get("missing_key"):
+            required = str(rule.get("required") or "")
+            if not required:
+                continue
+            key = ("unknown", rule.get("missing_key"), required)
+            if key in seen:
+                continue
+            seen.add(key)
+            checks.append({"state": "unknown", "key": str(rule.get("missing_key")),
+                           "required_ko": required})
+            if len(missing) < 2:
+                missing.append(f"확인 필요: {required}")
+    hits = [EMPLOYMENT_LABELS_KO[code] for code in employment_hits
+            if code in EMPLOYMENT_LABELS_KO]
+    for label in hits:
+        reasons.append(f"고용 이슈 일치({label})")
+    return {
+        "reasons_ko": [reason for reason in reasons if reason][:5],
+        "checks": checks[:3],
+        "open_questions_ko": missing,
     }
 
 
@@ -723,6 +1160,8 @@ def _match_one(cards: List[Dict[str, Any]], client: Dict[str, Any], *,
     region = profile.get("region") or {}
 
     business = profile.get("business") or {}
+    employment = frozenset(client.get("employment") or ())
+    industry_terms = tuple(client.get("industry_terms") or ())
     context = {
         "region_level": region.get("level") or "national",
         "sido": region.get("sido") or "",
@@ -737,40 +1176,104 @@ def _match_one(cards: List[Dict[str, Any]], client: Dict[str, Any], *,
     }
     words = [word for word in str(keyword or "").split() if word]
     candidates: List[Tuple[int, Dict[str, Any]]] = []
+    exclusions: Dict[str, int] = {}
+    examples: List[Dict[str, str]] = []
+    example_codes = set()
+    keyword_skipped = 0
     for card in cards:
         if words and not all(word in card["search_text"] for word in words):
+            keyword_skipped += 1
             continue
-        if _fast_fail(card, context):
+        reason = _fast_fail_reason(card, context)
+        if reason:
+            exclusions[reason] = exclusions.get(reason, 0) + 1
+            if reason not in example_codes and len(examples) < 2:
+                example_codes.add(reason)
+                examples.append({"reason_code": reason,
+                                 "reason_label_ko": EXCLUSION_LABELS_KO.get(reason, reason),
+                                 "name": card["svc"].name,
+                                 "requirement_ko": _requirement_text(reason, card)})
             continue
-        candidates.append((_pre_score(card, size=size, industry=spec["industry"], region=region),
+        candidates.append((_pre_score(card, size=size, industry=spec["industry"], region=region,
+                                      employment=employment, industry_terms=industry_terms),
                            card))
+    if keyword_skipped:
+        exclusions[EXCLUSION_KEYWORD] = keyword_skipped
     shortlist = _shortlist(candidates, 1 if len(candidates) <= 1 else SHORTLIST)
+    if len(candidates) > len(shortlist):
+        exclusions[EXCLUSION_SHORTLIST] = len(candidates) - len(shortlist)
 
     rows: List[Dict[str, Any]] = []
+    engine_rejected = 0
     for card in shortlist:
         row = engine.evaluate_service(card["svc"], profile)
         if (row.get("verdict") or {}).get("code") == "ineligible":
+            engine_rejected += 1
             continue
         report_row = agent_report._report_row(row, size=size, industry=spec["industry"],
                                               region=region)
         # `_report_row` 는 금액을 싣지 않는다 — 일괄 리포트는 '예상 지원금·혜택' 칸이 필요하다.
         report_row["amount"] = row.get("amount") or ""
+        # 판정에 쓰인 why(규칙)와 고용 이슈 일치를 근거 문구로 옮긴다.
+        report_row["why"] = row.get("why") or []
+        report_row["employment_hits"] = tuple(sorted(card.get("employment") & employment))
+        if report_row["employment_hits"]:
+            # 거래처가 밝힌 고용 이슈를 다루는 공고는 리포트 안에서도 앞에 놓는다.
+            priority = report_row.get("priority") or {}
+            priority["score"] = int(priority.get("score") or 0) + 6
+            labels = [EMPLOYMENT_LABELS_KO[code] for code in report_row["employment_hits"]]
+            reasons = priority.get("reasons_ko")
+            if isinstance(reasons, list):
+                reasons.append("고용 이슈 일치(" + ", ".join(labels) + ")")
         rows.append(report_row)
+    if engine_rejected:
+        exclusions[EXCLUSION_ENGINE] = engine_rejected
     if spec["interest"]:
+        before_interest = len(rows)
         rows = [row for row in rows if row["category"] in spec["interest"]]
+        if len(rows) < before_interest:
+            exclusions[EXCLUSION_CATEGORY] = before_interest - len(rows)
     rows.sort(key=agent_report._sort_key)
-    picked = _select_top(rows, top_n)
+    emphasis = sum(1 for row in rows if row.get("employment_hits"))
+    picked = _select_top(rows, top_n, emphasis=emphasis)
 
-    matches = [_compact_match(row, index) for index, row in enumerate(picked, start=1)]
+    matches: List[Dict[str, Any]] = []
+    for index, row in enumerate(picked, start=1):
+        item = _compact_match(row, index)
+        item["fit"] = _fit_block(row, row.get("employment_hits") or ())
+        matches.append(item)
+
+    ordered = [code for code in EXCLUSION_ORDER if exclusions.get(code)]
+    exclusion_block = {
+        "total": sum(exclusions.values()),
+        "by_reason": [{"code": code, "label_ko": EXCLUSION_LABELS_KO[code], "count": exclusions[code]}
+                      for code in ordered],
+        "top_label_ko": (f"{EXCLUSION_LABELS_KO[ordered[0]]} {exclusions[ordered[0]]}건"
+                         if ordered else ""),
+        "examples": examples,
+        "note_ko": (
+            "탈락 사유는 공고의 구조화된 신청자격(지역·기업 형태·업력·연령·성별·업종)만 근거로 "
+            "셉니다. 원문 서술 요건은 판정 전 단계에서 걸러지지 않습니다."
+        ),
+    }
+
     codes = {
         "industry": client["industry"] or ("pre_startup" if client["startup"] else None),
         "industry_label": (programs.INDUSTRY_LABELS.get(client["industry"] or "", "미지정")
                            if not client["startup"] else "예비창업자"),
+        "industry_terms": list(industry_terms),
         "employees": client["employees"],
+        "employees_source": client.get("employees_source") or "",
         "revenue_krw": client["revenue_krw"],
         "revenue_label": agent_report._krw_label(client["revenue_krw"]),
         "revenue_source": client["revenue_source"],
         "business_age_years": client["business_age_years"],
+        "years_source": client.get("years_source") or "",
+        "entity": client.get("entity"),
+        "entity_label": programs.ENTITY_LABELS.get(client.get("entity") or "", ""),
+        "employment": list(employment),
+        "employment_labels_ko": [EMPLOYMENT_LABELS_KO[code] for code in EMPLOYMENT_LABELS_KO
+                                 if code in employment],
         "region": {"sido": client["region"].get("sido", ""),
                    "sigungu": client["region"].get("sigungu", ""),
                    "label": client["region"].get("label", "")},
@@ -779,6 +1282,7 @@ def _match_one(cards: List[Dict[str, Any]], client: Dict[str, Any], *,
         "candidates": len(candidates),
         "evaluated": len(shortlist),
         "shown": len(matches),
+        "excluded": sum(exclusions.values()),
         "eligible_likely": sum(1 for row in matches
                                if (row["verdict"] or {}).get("code") == "eligible_likely"),
         "check_needed": sum(1 for row in matches
@@ -792,13 +1296,37 @@ def _match_one(cards: List[Dict[str, Any]], client: Dict[str, Any], *,
     notes: List[str] = []
     if client["parse_errors"]:
         notes.extend(client["parse_errors"])
+    if client.get("parse_notes"):
+        notes.extend(client["parse_notes"])
+    if client["employees_note_ko"]:
+        notes.append(f"상시근로자는 {client['employees_note_ko']}.")
     if client["revenue_note_ko"]:
         notes.append(f"연매출 {client['revenue_note_ko']}.")
+    if client.get("entity"):
+        label = programs.ENTITY_LABELS.get(client["entity"], client["entity"])
+        notes.append(f"기업 형태는 입력값({label})으로 판정했습니다. 확정은 확인서로 합니다.")
+        if client["entity"] == "small_business" and size.get("small_business_likely") is False:
+            notes.append("입력한 근로자·매출은 소상공인 기준을 넘습니다. 기업 형태를 잘못 적었는지 "
+                         "확인하세요(소상공인 전용 공고는 자격 확인 필요).")
+        if client["entity"] in ("sme", "corporate", "venture", "social_enterprise") \
+                and size.get("small_business_likely") is True:
+            notes.append("근로자·매출만 보면 소상공인 기준을 충족합니다. 소상공인 전용 공고도 "
+                         "살펴보시려면 기업 형태를 비우거나 소상공인으로 다시 돌려 보세요.")
     if status == "no_match":
         notes.append("조건과 명확히 어긋나지 않는 공고가 후보에 없었습니다. 업종·지역·업력을 "
                      "확인하거나 조건 없이 단건 리포트로 다시 뽑아 보세요.")
     if status == "no_candidate":
         notes.append("업종·규모·지역 조건에서 남는 후보가 없었습니다. 입력값을 확인하세요.")
+    if exclusion_block["top_label_ko"] and status != "matched":
+        notes.append(f"가장 많이 빠진 사유: {exclusion_block['top_label_ko']}.")
+    if employment and not any(match["employment_hits_ko"] for match in matches):
+        labels = ", ".join(EMPLOYMENT_LABELS_KO[code] for code in EMPLOYMENT_LABELS_KO
+                           if code in employment)
+        notes.append(f"고용 이슈({labels})가 공고 문구에 드러난 후보는 추천에 들지 못했습니다. "
+                     "노무 지원사업을 따로 찾으려면 keyword 에 '일자리'·'고용'을 넣어 보세요.")
+    if industry_terms and any(term in (match.get("name") or "") for match in matches
+                              for term in industry_terms):
+        notes.append("세부 업종 키워드가 공고명에 있는 공고를 우선했습니다(판정 조건은 업종 대분류).")
     if size.get("small_business_likely") is False:
         notes.append("소상공인 기준을 넘습니다. 중소기업·소기업 지원사업 위주로 검토하세요.")
     # 규모 판정이 '일부 요건만 확인'이어도, 넘은 요건은 그대로 알린다(판정을 바꾸지는 않는다).
@@ -815,6 +1343,7 @@ def _match_one(cards: List[Dict[str, Any]], client: Dict[str, Any], *,
                           "small_business_likely": size.get("small_business_likely"),
                           "summary_ko": size.get("summary_ko") or ""},
         "counts": counts,
+        "exclusions": exclusion_block,
         "matches": matches,
         "notes_ko": notes,
     }
@@ -848,20 +1377,39 @@ def match_clients(catalog: Catalog, args: Optional[Dict[str, Any]] = None) -> Di
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     by_verdict = {"eligible_likely": 0, "check_needed": 0}
+    by_category: Dict[str, int] = {slug: 0 for slug in agent_report.CATEGORY_ORDER}
+    by_exclusion: Dict[str, int] = {}
     for result in results:
         for match in result["matches"]:
             code = (match["verdict"] or {}).get("code")
             if code in by_verdict:
                 by_verdict[code] += 1
+            category = match.get("category")
+            if category in by_category:
+                by_category[category] += 1
+        for row in (result.get("exclusions") or {}).get("by_reason") or []:
+            by_exclusion[row["code"]] = by_exclusion.get(row["code"], 0) + int(row["count"])
+    exclusion_rank = sorted(by_exclusion.items(), key=lambda pair: (-pair[1],
+                                                                   EXCLUSION_ORDER.index(pair[0])
+                                                                   if pair[0] in EXCLUSION_ORDER else 99))
     summary = {
         "clients": len(results),
         "matched": sum(1 for result in results if result["status"] == "matched"),
         "no_match": sum(1 for result in results if result["status"] != "matched"),
         "with_notes": sum(1 for result in results if result["notes_ko"]),
+        "with_parse_errors": sum(1 for result in results
+                                 if any("비웠" in note or "읽지 못" in note
+                                        for note in result["notes_ko"])),
+        "with_employment": sum(1 for result in results
+                               if (result["conditions"] or {}).get("employment")),
         "matches": sum(len(result["matches"]) for result in results),
         "clients_with_urgent": sum(1 for result in results
                                    if any(match["closing_soon"] for match in result["matches"])),
         "by_verdict": by_verdict,
+        "by_category": by_category,
+        "by_exclusion": {code: count for code, count in exclusion_rank},
+        "exclusion_top_ko": [f"{EXCLUSION_LABELS_KO.get(code, code)} {count:,}건"
+                             for code, count in exclusion_rank[:4]],
         "elapsed_ms": elapsed_ms,
         "business_programs_scanned": len(cards),
         "top_n": top_n,
@@ -869,8 +1417,9 @@ def match_clients(catalog: Catalog, args: Optional[Dict[str, Any]] = None) -> Di
 
     dropped = parsed["columns_dropped_sensitive"]
     anonymity = {
-        "matching_inputs": ["client_ref(익명 코드)", "업종 코드", "상시근로자 수",
-                            "연매출/구간", "업력", "시도·시군구"],
+        "matching_inputs": ["client_ref(익명 코드)", "업종 코드", "업종 세부 키워드",
+                            "상시근로자 수/구간", "연매출/구간", "업력/설립연도",
+                            "시도·시군구", "기업 형태", "고용 이슈"],
         "identity_columns_dropped": dropped,
         "identity_used_in_matching": False,
         "labels_included": allow_labels,
@@ -898,6 +1447,9 @@ def match_clients(catalog: Catalog, args: Optional[Dict[str, Any]] = None) -> Di
             "include_closed": include_closed,
             "keyword": keyword,
         },
+        "condition_guide_ko": CONDITION_GUIDE_KO,
+        "exclusion_legend_ko": [{"code": code, "label_ko": EXCLUSION_LABELS_KO[code]}
+                                for code in EXCLUSION_ORDER],
         "clients": results,
         "checked_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "schema_version": SCHEMA_VERSION,
@@ -920,19 +1472,35 @@ def to_markdown(payload: Dict[str, Any], *, clients_shown: int = 8, limit: int =
     dropped = anonymity.get("identity_columns_dropped") or []
     lines.append("매칭 입력: 익명 코드 + 업종·근로자·매출·업력·지역"
                  + (f" · 값을 읽지 않은 열: {', '.join(dropped)}" if dropped else ""))
+    by_category = summary.get("by_category") or {}
+    if any(by_category.values()):
+        lines.append("묶음: " + " · ".join(
+            f"{agent_report.CATEGORY_LABELS_KO[slug]} {count}"
+            for slug, count in by_category.items()
+            if count and slug in agent_report.CATEGORY_LABELS_KO))
+    if summary.get("exclusion_top_ko"):
+        lines.append("탈락 사유(전체): " + " · ".join(summary["exclusion_top_ko"]))
     for client in (payload.get("clients") or [])[:clients_shown]:
         conditions = client.get("conditions") or {}
         region = (conditions.get("region") or {}).get("label") or "전국"
         head = (f"[{client.get('client_ref')}] {conditions.get('industry_label') or '업종 미지정'}"
                 f" · 상시 {conditions.get('employees') if conditions.get('employees') is not None else '미입력'}"
                 f" · {region}")
+        extras = [label for label in (conditions.get("employment_labels_ko") or [])]
+        if conditions.get("entity_label"):
+            extras.append(conditions["entity_label"])
+        if conditions.get("industry_terms"):
+            extras.append("/".join(conditions["industry_terms"][:2]))
+        if extras:
+            head += " · " + " · ".join(extras)
         lines.append(head)
         for match in (client.get("matches") or [])[:limit]:
             verdict = (match.get("verdict") or {}).get("label_ko") or ""
             lines.append(f"  · {match.get('d_day')} [{match.get('category_label')}] "
                          f"{match.get('name')} — {verdict}")
         if not client.get("matches"):
-            lines.append("  · 조건에 맞는 공고 없음")
+            reason = (client.get("exclusions") or {}).get("top_label_ko") or ""
+            lines.append("  · 조건에 맞는 공고 없음" + (f" (가장 많이 빠진 사유: {reason})" if reason else ""))
     if len(payload.get("clients") or []) > clients_shown:
         lines.append(f"… 외 {len(payload['clients']) - clients_shown}곳")
     return "\n".join(lines)
@@ -942,6 +1510,9 @@ def to_markdown(payload: Dict[str, Any], *, clients_shown: int = 8, limit: int =
 CSV_COLUMNS: List[Tuple[str, str]] = [
     ("거래처코드", "client_ref"),
     ("업종", "industry"),
+    ("업종 키워드", "industry_terms"),
+    ("기업 형태", "entity"),
+    ("고용 이슈", "employment"),
     ("상시근로자", "employees"),
     ("연매출", "revenue"),
     ("업력(년)", "years"),
@@ -956,6 +1527,8 @@ CSV_COLUMNS: List[Tuple[str, str]] = [
     ("마감일", "deadline"),
     ("D-day", "d_day"),
     ("신청 링크", "link"),
+    ("판정 근거", "fit"),
+    ("탈락 사유(요약)", "exclusion"),
     ("메모", "note"),
 ]
 
@@ -986,15 +1559,21 @@ def to_csv(payload: Dict[str, Any]) -> str:
     for client in payload.get("clients") or []:
         conditions = client.get("conditions") or {}
         region = (conditions.get("region") or {}).get("label") or "전국"
+        exclusions = client.get("exclusions") or {}
         base = {
             "client_ref": client.get("client_ref"),
             "industry": conditions.get("industry_label") or "",
+            "industry_terms": "/".join(conditions.get("industry_terms") or []),
+            "entity": conditions.get("entity_label") or "",
+            "employment": "/".join(conditions.get("employment_labels_ko") or []),
             "employees": ("" if conditions.get("employees") is None
                           else conditions.get("employees")),
             "revenue": conditions.get("revenue_label") or "",
             "years": ("" if conditions.get("business_age_years") is None
                       else conditions.get("business_age_years")),
             "region": region,
+            "exclusion": " · ".join(f"{row['label_ko']} {row['count']}"
+                                    for row in (exclusions.get("by_reason") or [])[:3]),
         }
         matches = client.get("matches") or []
         if not matches:
@@ -1015,6 +1594,7 @@ def to_csv(payload: Dict[str, Any]) -> str:
                 "deadline": match.get("deadline_date") or match.get("deadline_text"),
                 "d_day": match.get("d_day"),
                 "link": match.get("link"),
+                "fit": " / ".join(((match.get("fit") or {}).get("reasons_ko") or [])[:3]),
                 "note": client.get("label") or "",
             })
             writer.writerow([_csv_cell(row.get(key)) for _, key in CSV_COLUMNS])
@@ -1142,6 +1722,12 @@ def _client_page(client: Dict[str, Any], index: int) -> str:
         f"업력 {f'{years:g}년' if isinstance(years, (int, float)) else '미입력'}",
         region,
     ]
+    if conditions.get("entity_label"):
+        tags.append(conditions["entity_label"])
+    for label in conditions.get("employment_labels_ko") or []:
+        tags.append(f"고용: {label}")
+    if conditions.get("industry_terms"):
+        tags.append("업종 키워드: " + "/".join(conditions["industry_terms"][:2]))
     title = client.get("client_ref") or f"C-{index:03d}"
     label = client.get("label") or ""
     head = [
@@ -1175,12 +1761,19 @@ def _client_page(client: Dict[str, Any], index: int) -> str:
             link_cell = (f'<a href="{_esc(link)}" target="_blank" rel="noopener noreferrer">신청</a>'
                          if link else "—")
             benefit = match.get("benefit_summary_ko") or match.get("requirements_ko") or ""
+            fit = match.get("fit") or {}
+            fit_lines = [reason for reason in (fit.get("reasons_ko") or [])[:3]
+                         if reason and reason not in (benefit or "")]
+            fit_lines += (fit.get("open_questions_ko") or [])[:1]
+            fits = (f'<div class="benefit">근거: {", ".join(_esc(line) for line in fit_lines)}</div>'
+                    if fit_lines else "")
             head.append(
                 "<tr>"
                 f'<td class="num">{_esc(match.get("rank"))}</td>'
                 f'<td><strong>{_esc(match.get("name"))}</strong><br>'
                 f'<span class="sub">{_esc(match.get("agency"))}</span>'
                 + (f'<div class="benefit">{_esc(benefit)}</div>' if benefit else "")
+                + fits
                 + "</td>"
                 f'<td class="num">{_esc(match.get("category_label"))}</td>'
                 f'<td class="num">{_esc(verdict)}</td>'
@@ -1197,6 +1790,19 @@ def _client_page(client: Dict[str, Any], index: int) -> str:
     if notes:
         head.append('<div class="notes"><strong>확인할 점</strong><ul>'
                     + "".join(f"<li>{_esc(note)}</li>" for note in notes) + "</ul></div>")
+
+    exclusions = client.get("exclusions") or {}
+    reasons = exclusions.get("by_reason") or []
+    if reasons:
+        head.append('<div class="notes"><strong>탈락 사유(왜 다른 공고는 빠졌나)</strong><ul>'
+                    + "".join(f"<li>{_esc(row['label_ko'])} {_esc(row['count'])}건</li>"
+                              for row in reasons[:5])
+                    + "</ul></div>")
+    examples = exclusions.get("examples") or []
+    if examples:
+        head.append('<p class="sub">빠진 예: '
+                    + " · ".join(f"{_esc(row.get('name'))}({_esc(row.get('requirement_ko'))})"
+                                for row in examples[:3]) + "</p>")
 
     head.append('<div class="foot">')
     head.append(f"<p>{_esc(DISCLAIMER_KO)}</p>")
@@ -1234,6 +1840,20 @@ def to_report_html(payload: Dict[str, Any], *, title: str = "거래처별 지원
     for limit in payload.get("scope_limits_ko") or []:
         parts.append(f"<li>{_esc(limit)}</li>")
     parts.append("</ul>")
+    by_category = summary.get("by_category") or {}
+    if any(by_category.values()):
+        parts.append('<div class="big">'
+                     + "".join(f'<span>{_esc(agent_report.CATEGORY_LABELS_KO.get(slug, slug))} '
+                               f'{_esc(count)}건</span>'
+                               for slug, count in by_category.items() if count)
+                     + "</div>")
+    if summary.get("exclusion_top_ko"):
+        parts.append("<h2>탈락 사유 상위</h2><ul>"
+                     + "".join(f"<li>{_esc(item)}</li>" for item in summary["exclusion_top_ko"][:4])
+                     + "</ul>")
+    parts.append("<h2>조건 열 읽는 법</h2><ul>"
+                 + "".join(f"<li>{_esc(item)}</li>" for item in CONDITION_GUIDE_KO)
+                 + "</ul>")
     parts.append(f'<div class="foot"><p>{_esc(payload.get("disclaimer_ko") or DISCLAIMER_KO)}</p></div>')
     parts.append("</section>")
     for index, client in enumerate(clients, start=1):
@@ -1257,25 +1877,31 @@ def filename_for(payload: Dict[str, Any], suffix: str) -> str:
 
 SAMPLE_CSV_ROWS: List[Dict[str, str]] = [
     {"client_ref": "C-001", "company_name": "예시상호A", "biz_no": "000-00-00000",
-     "industry": "음식숙박", "employees": "3", "revenue_bracket": "1억~2억",
+     "industry": "음식숙박", "industry_keyword": "한식", "employment": "",
+     "entity": "소상공인", "employees": "3", "revenue_bracket": "1억~2억",
      "business_age_years": "4", "region": "인천광역시 서구", "note": "음식점"},
     {"client_ref": "C-002", "company_name": "예시상호B", "biz_no": "000-00-00001",
-     "industry": "제조", "employees": "8", "revenue_bracket": "30억~50억",
+     "industry": "제조", "industry_keyword": "전자부품", "employment": "청년",
+     "entity": "", "employees": "8", "revenue_bracket": "30억~50억",
      "business_age_years": "9", "region": "경기도 화성시", "note": "부품 제조"},
     {"client_ref": "C-003", "company_name": "예시상호C", "biz_no": "000-00-00002",
-     "industry": "IT·정보통신", "employees": "5", "revenue_krw": "350000000",
+     "industry": "IT·정보통신", "industry_keyword": "소프트웨어", "employment": "청년, 육아휴직",
+     "entity": "", "employees": "5", "revenue_krw": "350000000",
      "revenue_bracket": "", "business_age_years": "3", "region": "서울특별시 마포구",
      "note": "소프트웨어"},
     {"client_ref": "C-004", "company_name": "예시상호D", "biz_no": "000-00-00003",
-     "industry": "도소매", "employees": "2", "revenue_bracket": "5천만원 미만",
+     "industry": "도소매", "industry_keyword": "온라인몰", "employment": "",
+     "entity": "소상공인", "employees": "2", "revenue_bracket": "5천만원 미만",
      "business_age_years": "1", "region": "부산광역시 해운대구", "note": "온라인 판매"},
     {"client_ref": "C-005", "company_name": "예시상호E", "biz_no": "000-00-00004",
-     "industry": "서비스", "employees": "12", "revenue_bracket": "3억 이상",
+     "industry": "서비스", "industry_keyword": "시설관리", "employment": "고령",
+     "entity": "", "employees": "12", "revenue_bracket": "3억 이상",
      "business_age_years": "12", "region": "대구광역시 수성구", "note": "시설관리"},
 ]
 
-SAMPLE_CSV_COLUMNS = ["client_ref", "company_name", "biz_no", "industry", "employees",
-                      "revenue_krw", "revenue_bracket", "business_age_years", "region", "note"]
+SAMPLE_CSV_COLUMNS = ["client_ref", "company_name", "biz_no", "industry", "industry_keyword",
+                      "employment", "entity", "employees", "revenue_krw", "revenue_bracket",
+                      "business_age_years", "region", "note"]
 
 
 def sample_csv(rows: Optional[List[Dict[str, str]]] = None) -> str:

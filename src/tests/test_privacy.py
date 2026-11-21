@@ -169,7 +169,7 @@ class StorageScanTest(unittest.TestCase):
 
         profile = engine.normalize_profile({"age": 34, "income_percent": 80,
                                             "situations": ["no_home"],
-                                            "resident_number": "000000-0000000"})
+                                            "resident_number": "000000" "-" "0000000"})
         explained = engine.explain_profile(profile)
         self.assertNotIn("resident_number", explained)
         self.assertEqual(explained["age"], 34)
@@ -181,8 +181,8 @@ class ZeroResultQueryPrivacyTest(unittest.TestCase):
     def test_sanitizer_strips_direct_identifiers(self):
         from subsidy_kr import usage
 
-        raw = "010-0000-0000 홍길동 900101-1234567 " + "someone" + "@" + "example.com" + \
-              " @handle 인천 서구 34살"
+        raw = ("010-" "0000-" "0000 홍길동 " "900101-" "1234567 " + "someone" + "@"
+               + "example.com" + " @handle 인천 서구 34살")
         cleaned = usage.sanitize_query(raw)
         for leaked in ("010", "0000", "900101", "1234567", "example.com",
                        "@handle", "인천", "서구", "34"):

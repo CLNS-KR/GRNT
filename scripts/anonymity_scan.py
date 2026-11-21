@@ -9,6 +9,18 @@
    그 목록을 더합니다(줄 단위, `#` 주석 허용).
 3. **비밀값** — GitHub 토큰, OpenAIㆍGoogle API 키, 개인키 블록, `password=` 류 대입.
 
+오탐을 줄이는 규칙
+-----------------
+이 저장소에는 법령 API 주소(`law.go.kr/...?admRulSeq=2100000269780`)처럼 **13자리 숫자가
+들어간 공개 URL**과, 마스킹 동작을 시험하려고 둔 **자리표시자 번호**(국번 뒤가 모두 0 인 번호)가
+많습니다. 이걸 개인정보로 세면 진짜 발견이 묻히므로 다음을 구분합니다.
+
+- URL 안의 숫자·주소는 개인정보가 아니다(참조 링크).
+- 휴대전화는 국번 뒤가 모두 0 이거나 `0000` 으로 시작하면 자리표시자다.
+- 주민등록번호는 생년월일(월 1~12ㆍ일 1~31)ㆍ성별 자리(1~8)ㆍ검증 숫자가 맞아야 한다.
+  아무 13자리 숫자나 주민등록번호로 세지 않는다.
+- 메일 주소는 예약된 시험용 도메인(`.test`ㆍ`.invalid`ㆍexample.com 등)을 통과시킨다.
+
 쓰는 법
 -------
     python scripts/anonymity_scan.py            # 저장소 전체 검사(CI 와 같은 범위)
@@ -42,12 +54,13 @@ IDENTITY_TERMS: Tuple[str, ...] = (
     "pil" + "otage",
 )
 
-EMAIL_ALLOW_LIST = ("example.com", "example.org", "users.noreply.github.com",
-                    "localhost", "clns-kr")
+EMAIL_ALLOW_LIST = ("example.com", "example.org", "example.net", "example.test",
+                    "users.noreply.github.com", "localhost", "clns-kr", ".test",
+                    ".invalid", ".example", ".localhost")
 
 PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("휴대전화 번호", re.compile(r"01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}")),
-    ("주민등록번호 모양", re.compile(r"\b\d{6}[-\s]?\d{7}\b")),
+    ("주민등록번호 모양", re.compile(r"\b\d{6}[-.\s]?\d{7}\b")),
     ("개인 메일 주소", re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")),
     ("로컬 사용자 경로", re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/")),
     ("GitHub 토큰", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}")),
@@ -56,6 +69,9 @@ PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("비밀번호 대입", re.compile(r"(?i)\b(?:password|passwd|secret|api[_-]?key)\s*=\s*['\"][^'\"\s]{6,}['\"]")),
 )
 
+_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
+_RRN_WEIGHTS = (2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5)
+
 
 def _mask(value: str) -> str:
     text = value.strip()
@@ -63,6 +79,57 @@ def _mask(value: str) -> str:
         return "*" * len(text)
     keep = min(2, len(text) // 4)
     return text[:keep] + "*" * max(1, len(text) - keep * 2) + text[-keep:]
+
+
+def _url_spans(line: str, offset: int = 0) -> List[Tuple[int, int]]:
+    return [(match.start() + offset, match.end() + offset) for match in _URL_RE.finditer(line)]
+
+
+def _inside(spans: List[Tuple[int, int]], start: int, end: int) -> bool:
+    return any(left <= start and end <= right for left, right in spans)
+
+
+def _digits(value: str) -> str:
+    return re.sub(r"\D", "", value)
+
+
+def _looks_like_placeholder_phone(value: str) -> bool:
+    """국번 뒤가 모두 0 인 자리표시자(마스킹 시험용) 번호인가."""
+    digits = _digits(value)
+    if not digits:
+        return False
+    body = digits[3:]
+    if not body:
+        return True
+    if set(body) <= {"0"}:
+        return True
+    # 국번 뒤 첫 네 자리가 0000 이면 실제 번호로 쓰이지 않는 자리표시자다.
+    return body.startswith("0000")
+
+
+def _looks_like_rrn(value: str) -> bool:
+    """생년월일ㆍ성별 자리ㆍ검증 숫자가 맞는 주민등록번호 모양인가.
+
+    법령 API 주소에 들어간 13자리 숫자나 13자리 품목보고번호는 월이 12를 넘거나
+    검증 숫자가 맞지 않아 여기서 걸러진다. 진짜 주민등록번호는 그대로 잡힌다.
+    """
+    digits = _digits(value)
+    if len(digits) != 13:
+        return False
+    month, day = int(digits[2:4]), int(digits[4:6])
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return False
+    if digits[6] not in "12345678":
+        return False
+    total = sum(int(digit) * weight for digit, weight in zip(digits[:12], _RRN_WEIGHTS))
+    return (11 - total % 11) % 10 == int(digits[12])
+
+
+def _isolated(line: str, start: int, end: int) -> bool:
+    """앞뒤가 숫자인 더 긴 숫자열의 일부가 아닌가(URL 경로 속 번호 방지)."""
+    before = line[start - 1] if start > 0 else ""
+    after = line[end] if end < len(line) else ""
+    return not (before.isdigit() or after.isdigit())
 
 
 def _iter_files(paths: Iterable[str]) -> Iterable[Path]:
@@ -93,6 +160,30 @@ def _extra_terms() -> List[str]:
     return terms
 
 
+def _is_allowed(label: str, value: str, line: str, start: int, end: int,
+                spans: List[Tuple[int, int]]) -> bool:
+    """패턴에 걸렸지만 개인정보가 아닌 경우(URL 속 번호ㆍ자리표시자ㆍ시험용 도메인)."""
+    if label == "개인 메일 주소":
+        if any(ok in value for ok in EMAIL_ALLOW_LIST):
+            return True
+        return _inside(spans, start, end)
+    if label == "휴대전화 번호":
+        if _looks_like_placeholder_phone(value):
+            return True
+        if _inside(spans, start, end):
+            return True
+        return not _isolated(line, start, end)
+    if label == "주민등록번호 모양":
+        if _inside(spans, start, end):
+            return True
+        if not _isolated(line, start, end):
+            return True
+        return not _looks_like_rrn(value)
+    if label == "비밀번호 대입":
+        return any(token in value.lower() for token in ("<", "example", "your_", "xxx", "none"))
+    return False
+
+
 def scan(paths: Iterable[str]) -> List[str]:
     findings: List[str] = []
     identity = list(IDENTITY_TERMS) + _extra_terms()
@@ -107,13 +198,11 @@ def scan(paths: Iterable[str]) -> List[str]:
             for term in identity:
                 if term and term.lower() in lowered:
                     findings.append(f"{_rel(path)}:{number}: 신원 노출 의심('{_mask(term)}')")
+            spans = _url_spans(line)
             for label, pattern in PATTERNS:
                 for match in pattern.finditer(line):
                     value = match.group(0)
-                    if label == "개인 메일 주소" and any(ok in value for ok in EMAIL_ALLOW_LIST):
-                        continue
-                    if label == "비밀번호 대입" and any(
-                            token in value.lower() for token in ("<", "example", "your_", "xxx", "none")):
+                    if _is_allowed(label, value, line, match.start(), match.end(), spans):
                         continue
                     findings.append(f"{_rel(path)}:{number}: {label}('{_mask(value)}')")
     return findings

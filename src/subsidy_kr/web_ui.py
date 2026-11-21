@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from . import conditions, guides, programs, regions, site_verification
 from .version import __version__
@@ -308,6 +308,65 @@ def _industry_options() -> str:
     )
 
 
+def home_json_ld(root: str) -> str:
+    """홈 구조화 데이터 — Organization · WebSite · WebApplication 을 @id 로 이어 붙인다.
+
+    AI 검색·검색엔진이 "이 사이트가 무엇을 하는 곳인지"를 한 덩어리로 읽게 하고,
+    같은 서비스가 여러 @type 으로 흩어져 서로 다른 사이트처럼 보이지 않게 한다.
+    """
+    graph: List[Dict[str, Any]] = [
+        {
+            "@type": "Organization",
+            "@id": root + "/#org",
+            "name": SERVICE_NAME,
+            "url": root + "/",
+            "sameAs": ["https://github.com/CLNS-KR/GRNT"],
+        },
+        {
+            "@type": "WebSite",
+            "@id": root + "/#website",
+            "name": f"{SERVICE_NAME} — {SERVICE_TITLE_KO}",
+            "url": root + "/",
+            "inLanguage": "ko-KR",
+            "publisher": {"@id": root + "/#org"},
+            "potentialAction": {
+                "@type": "SearchAction",
+                "target": {"@type": "EntryPoint",
+                           "urlTemplate": root + "/?q={search_term_string}"},
+                "query-input": "required name=search_term_string",
+            },
+        },
+        {
+            "@type": "WebApplication",
+            "@id": root + "/#app",
+            "name": SERVICE_NAME,
+            "url": root + "/",
+            "applicationCategory": "FinanceApplication",
+            "operatingSystem": "Web",
+            "inLanguage": "ko-KR",
+            "isAccessibleForFree": True,
+            "offers": {"@type": "Offer", "price": "0", "priceCurrency": "KRW"},
+            "description": (
+                "한국 개인·창업 지원금 자격 사전 점검. 공개 자격 코드와 공고 신청자격으로 "
+                "4단계 판정하고 사유·누락 정보·출처를 함께 보여 준다. 로그인 없음, 확정 판정 아님."
+            ),
+            "featureList": [
+                "개인·가구 지원금 자격 판정(정부24 보조금24 자격 코드)",
+                "창업·기업 지원사업 신청자격 판정(K-Startup·기업마당 구조화 요건)",
+                "거래처 일괄 익명 매칭(세무·노무 사무소용, 상호·사업자번호 미사용)",
+                "MCP(JSON-RPC 2.0) 툴 9종과 REST JSON 동시 제공",
+            ],
+            "isPartOf": {"@id": root + "/#website"},
+            "publisher": {"@id": root + "/#org"},
+            "sameAs": ["https://github.com/CLNS-KR/GRNT"],
+        },
+    ]
+    body = {"@context": "https://schema.org", "@graph": graph}
+    return ('<script type="application/ld+json">'
+            + json.dumps(body, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+            + "</script>")
+
+
 def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
     from . import static_files
 
@@ -354,6 +413,7 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
         share_script=SHARE_SCRIPT,
         extra_script=ENTRY_SCRIPT + BATCH_SCRIPT + INQUIRY_SCRIPT,
         verification=site_verification.meta_tags(),
+        json_ld=home_json_ld(static_files.base_url()),
     )
 
 
@@ -447,6 +507,9 @@ BATCH_SCRIPT = """
      ['처리', (summary.elapsed_ms || 0) + 'ms']].forEach(function(pair){
       sumEl.appendChild(mk('span', null, pair[0] + ' ' + pair[1]));
     });
+    (summary.exclusion_top_ko || []).slice(0, 2).forEach(function(line){
+      sumEl.appendChild(mk('span', null, '탈락 주요 사유 ' + line));
+    });
 
     var anonymity = result.anonymity || {};
     var dropped = anonymity.identity_columns_dropped || [];
@@ -481,16 +544,33 @@ BATCH_SCRIPT = """
       var employees = (conditions.employees === null || conditions.employees === undefined)
         ? '미입력' : conditions.employees + '명';
       var details = mk('details', 'batch-client');
+      var extras = (conditions.employment_labels_ko || []).map(function(label){
+        return '고용 ' + label;
+      });
+      if (conditions.entity_label) { extras.push(conditions.entity_label); }
+      if (conditions.industry_terms && conditions.industry_terms.length) {
+        extras.push(conditions.industry_terms.join('/'));
+      }
       details.appendChild(mk('summary', null,
         client.client_ref + ' · ' + (conditions.industry_label || '업종 미지정')
         + ' · 상시 ' + employees + ' · ' + region
         + ' · ' + (client.matches || []).length + '건'
+        + (extras.length ? ' · ' + extras.join(' · ') : '')
         + (client.label ? ' · ' + client.label : '')));
       (client.matches || []).forEach(function(match){
         details.appendChild(mk('p', null,
           (match.d_day || '') + ' [' + (match.category_label || '') + '] ' + (match.name || '')
           + ' — ' + ((match.verdict || {}).label_ko || '')));
+        var fit = ((match.fit || {}).reasons_ko || []).slice(0, 2);
+        if (fit.length) { details.appendChild(mk('p', 'hint', '근거: ' + fit.join(', '))); }
       });
+      var exclusions = client.exclusions || {};
+      if ((exclusions.by_reason || []).length) {
+        details.appendChild(mk('p', 'hint', '탈락 사유: '
+          + exclusions.by_reason.slice(0, 3).map(function(row){
+              return row.label_ko + ' ' + row.count;
+            }).join(' · ')));
+      }
       (client.notes_ko || []).forEach(function(note){
         details.appendChild(mk('p', null, '확인: ' + note));
       });
@@ -836,12 +916,7 @@ PAGE_TEMPLATE = """<!doctype html>
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="{share_origin}/">
 <meta name="robots" content="index,follow">
-{verification}<script type="application/ld+json">
-{{"@context":"https://schema.org","@type":"WebApplication","name":"{service_name}",
-"applicationCategory":"FinanceApplication","operatingSystem":"Web","inLanguage":"ko-KR",
-"isAccessibleForFree":true,"offers":{{"@type":"Offer","price":"0","priceCurrency":"KRW"}},
-"description":"한국 개인·창업 지원금 자격 사전 점검. 공개 자격 코드와 공고 신청자격 기반 결정론 판정, 로그인 없음."}}
-</script>
+{verification}{json_ld}
 <style>{css}</style>
 </head>
 <body>
@@ -1058,9 +1133,11 @@ PAGE_TEMPLATE = """<!doctype html>
       <label class="field" style="margin-top:14px">
         <span class="lab">거래처 CSV</span>
         <textarea id="batch-csv" rows="8" spellcheck="false"
-          placeholder="client_ref,industry,employees,revenue_bracket,business_age_years,region&#10;C-001,음식숙박,3,1억~2억,4,인천광역시 서구"></textarea>
-        <span class="hint">열 이름은 한글도 됩니다(거래처코드·업종·직원수·연매출·업력·지역·비고).
-        매출은 <code>revenue_krw</code>(원) 또는 <code>revenue_bracket</code>(구간) 중 하나로 주세요.</span>
+          placeholder="client_ref,industry,industry_keyword,entity,employment,employees_bracket,revenue_bracket,business_age_years,region&#10;C-001,음식숙박,한식,소상공인,청년,5인 미만,1억~2억,4,인천광역시 서구"></textarea>
+        <span class="hint">열 이름은 한글도 됩니다(거래처코드·업종·업종키워드·기업형태·고용이슈·직원수구간·
+        연매출·업력·지역·비고). 매출은 <code>revenue_krw</code>(원) 또는 <code>revenue_bracket</code>(구간) 중
+        하나로 주세요. 고용 이슈는 <code>청년</code>·<code>고령</code>·<code>육아휴직</code>·<code>장애인</code>·
+        <code>사회보험료</code>를 쉼표로 구분해 넣으면 그 이슈를 다루는 공고를 앞자리에 넣습니다.</span>
       </label>
       <div class="actions" style="margin-top:12px">
         <button class="ghost" type="button" id="batch-sample">샘플 CSV 채우기</button>

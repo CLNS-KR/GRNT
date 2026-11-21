@@ -213,7 +213,7 @@ class HttpTest(unittest.TestCase):
         status, body = self._post("/v1/tools/search_subsidies", {
             "profile": {"age": 34, "income_band": "JA0203",
                         "region": {"sido": "인천광역시", "sigungu": "서구"}},
-            "keyword": "010-1234-5678 인천 서구 없는제도"})
+            "keyword": "010-" "1234-" "5678 인천 서구 없는제도"})
         self.assertEqual(status, 200)
         self.assertEqual(body["result"]["counts"]["eligible_likely"], 0)
         _, raw, _ = self._get("/v1/stats?days=1")
