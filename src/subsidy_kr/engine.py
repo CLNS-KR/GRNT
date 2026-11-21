@@ -30,7 +30,7 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import conditions, models, programs, regions, synonyms
-from .catalog import Catalog, Service
+from .catalog import Catalog, Service, browse_sort_key
 
 PASS = "pass"
 FAIL = "fail"
@@ -812,8 +812,13 @@ def structural_fail(service: Service, profile: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def evaluate_service(service: Service, profile: Dict[str, Any],
-                     today: Optional[date] = None) -> Dict[str, Any]:
+def _service_rules(service: Service, profile: Dict[str, Any],
+                   today: Optional[date] = None) -> List[Dict[str, Any]]:
+    """이 제도에 적용되는 판정 규칙 목록(중복 문구 제거까지).
+
+    `evaluate_service`(결과 한 건 만들기)와 `assess`(1.2만 건 빠른 훑기)가 **같은 규칙**을
+    보게 하려고 뽑아 둔다. 둘이 다른 규칙을 보면 정렬·건수가 판정과 어긋난다.
+    """
     rules: List[Dict[str, Any]] = []
     rules.append(_check_region(service, profile))
     if not service.is_business and _profile_is_empty(profile):
@@ -857,17 +862,66 @@ def evaluate_service(service: Service, profile: Dict[str, Any],
             continue
         seen_reasons.add(key)
         deduped_rules.append(r)
-    rules = deduped_rules
+    return deduped_rules
 
+
+def _verdict_from_rules(rules: List[Dict[str, Any]]) -> str:
     states = [rule["state"] for rule in rules]
     if FAIL in states:
-        code = models.VERDICT_INELIGIBLE
-    elif UNKNOWN in states:
-        code = models.VERDICT_INSUFFICIENT
-    elif NOTE in states:
-        code = models.VERDICT_CHECK
-    else:
-        code = models.VERDICT_ELIGIBLE
+        return models.VERDICT_INELIGIBLE
+    if UNKNOWN in states:
+        return models.VERDICT_INSUFFICIENT
+    if NOTE in states:
+        return models.VERDICT_CHECK
+    return models.VERDICT_ELIGIBLE
+
+
+def _specific_hits(rules: List[Dict[str, Any]]) -> int:
+    """내가 입력한 조건(상황·가구·업종·성별)에 직접 맞물린 규칙 수."""
+    hits = 0
+    for rule in rules:
+        if rule.get("state") != PASS:
+            continue
+        if rule.get("group") not in ("life", "household", "business", "gender"):
+            continue
+        if "가리지 않는" not in (rule.get("reason_ko") or ""):
+            hits += 1
+    return hits
+
+
+def _urgency(deadline: Dict[str, Any]) -> int:
+    days_left = deadline.get("days_left")
+    if days_left is not None and 0 <= days_left <= 7:
+        return 0
+    if deadline.get("closing_soon"):
+        return 1
+    return 2
+
+
+def assess(service: Service, profile: Dict[str, Any],
+           today: Optional[date] = None) -> Tuple[int, int, int, int, int, str, str]:
+    """한 건을 가볍게 판정해 **정렬 키와 판정 코드**만 돌려준다.
+
+    반환값은 `(정렬키 6개, 판정 코드)` 이고 앞의 6개는 `_sort_key` 와 같은 순서다.
+    결과 dict(사유·안내문·지문…)를 만들지 않으므로 1.2만 건을 훑어도 메모리가 거의 안 는다
+    (예전에는 후보 전부의 결과 dict 를 만들어 두어 한 번 검색에 100MB 넘게 썼다).
+    화면·API 에 실제로 돌려줄 줄만 `evaluate_service` 로 만든다.
+    """
+    rules = _service_rules(service, profile, today)
+    code = _verdict_from_rules(rules)
+    region_level = (service.region or {}).get("level") or "nationwide"
+    region_tier = {"sigungu": 0, "sido": 1}.get(region_level, 2)
+    kind_rank = 0 if service.benefit_kind == "grant" else 1
+    deadline = service.deadline or {}
+    key = (models.SORT_INDEX.get(code, 9), kind_rank, -_specific_hits(rules), region_tier,
+           _urgency(deadline), str(deadline.get("end_date") or "9999-12-31"))
+    return key + (code,)
+
+
+def evaluate_service(service: Service, profile: Dict[str, Any],
+                     today: Optional[date] = None) -> Dict[str, Any]:
+    rules = _service_rules(service, profile, today)
+    code = _verdict_from_rules(rules)
 
     missing = _missing_information(rules, profile)
     notes = _notes(service, rules, code)
@@ -1021,8 +1075,72 @@ def _dedupe(notes: List[str]) -> List[str]:
 # 반환은 최대 50행), 행 하나가 약 4.7KB 이므로 6,000행 ≈ 28MB 다. 판정한 전체 건수는
 # 메모리에 남기지 않는다(세기만 하고 버린다).
 SEARCH_CACHE_MAX_ROWS = 6000
-# 후보 목록(필터별) 캐시 — 1.2만 건 목록의 포인터만 들고 있어 항목당 수십 KB 다.
-POOL_CACHE_MAX = 32
+# 후보 목록(필터별) 캐시 — 항목 수 상한(예전: 목록 개수만 32).
+POOL_CACHE_MAX = 24
+# 보관하는 총 Service 객체 수 상한 — 1.2만 건 목록 하나가 약 43MB 이므로, 여러 지역·키워드로
+# 13~20번 검색해도 예전처럼 3.6만 개(130MB+)가 쌓이지 않게 묶는다.
+POOL_CACHE_MAX_ITEMS = 16000
+
+
+class _PoolCache:
+    """필터 조합 → 후보 `Service` 목록. **담긴 객체 수**로 메모리를 묶는 LRU.
+
+    카탈로그는 읽기 전용이고 후보 목록은 필터 조합으로만 결정되므로 재사용하면 빠르지만,
+    목록 개수만 제한하면 큰 목록(전국 1.1만 건) 몇 개로 Render 512MB 를 넘겼다(OOM).
+    지금은 목록 크기 합계가 상한을 넘으면 오래 쓴 것부터 내보내고, 한 목록이 상한보다
+    크면 아예 담지 않는다(결과 캐시가 같은 요청의 재계산은 이미 막는다).
+    """
+
+    __slots__ = ("_entries", "_items", "max_entries", "max_items")
+
+    def __init__(self, max_entries: int = POOL_CACHE_MAX,
+                 max_items: int = POOL_CACHE_MAX_ITEMS) -> None:
+        self.max_entries = max(1, int(max_entries))
+        self.max_items = max(1, int(max_items))
+        self._entries: "OrderedDict[Tuple[Any, ...], tuple]" = OrderedDict()
+        self._items = 0
+
+    @property
+    def items(self) -> int:
+        """지금 들고 있는 Service 객체 수(운영 확인·테스트용)."""
+        return self._items
+
+    def get(self, key: Tuple[Any, ...]) -> Optional[List[Service]]:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        try:
+            self._entries.move_to_end(key)
+        except KeyError:   # 다른 스레드가 방금 축출했다 — 값은 손에 있으니 그대로 준다
+            pass
+        return list(entry)
+
+    def put(self, key: Tuple[Any, ...], pool: List[Service]) -> None:
+        size = len(pool)
+        old = self._entries.pop(key, None)
+        if old is not None:
+            self._items -= len(old)
+        if size > self.max_items:
+            return   # 한 목록이 상한을 넘으면 담지 않는다(메모리 보호).
+        self._entries[key] = tuple(pool)
+        self._items += size
+        while self._items > self.max_items and self._entries:
+            try:
+                _key, entry = self._entries.popitem(last=False)
+            except KeyError:   # 다른 스레드가 먼저 축출했다
+                break
+            self._items -= len(entry)
+        while len(self._entries) > self.max_entries:
+            _key, entry = self._entries.popitem(last=False)
+            self._items -= len(entry)
+
+
+def _pool_cache(catalog: Catalog) -> _PoolCache:
+    cache = catalog.memo.get("pools")
+    if not isinstance(cache, _PoolCache):
+        cache = _PoolCache()
+        catalog.memo["pools"] = cache
+    return cache
 
 
 def profile_key(profile: Dict[str, Any]) -> Tuple[Any, ...]:
@@ -1203,13 +1321,10 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
            profile.get("track", "all"), bool((profile.get("business") or {}).get("declared")),
            bool(include_closed), tag or "", keyword or "", int(max_scan),
            bool(expand_keyword))
-    cache = catalog.memo.get("pools")
-    if cache is None:
-        cache = {}
-        catalog.memo["pools"] = cache
+    cache = _pool_cache(catalog)
     cached = cache.get(key)
     if cached is not None:
-        return list(cached)
+        return cached
 
     if hasattr(catalog, "query_pool"):
         pool = catalog.query_pool(
@@ -1254,9 +1369,7 @@ def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
                                         f"{' '.join(svc.business.get('hashtags') or [])}"
                                for word in words)]
 
-    if len(cache) >= POOL_CACHE_MAX:
-        cache.clear()
-    cache[key] = tuple(pool)
+    cache.put(key, pool)
     return pool
 
 
@@ -1288,15 +1401,29 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     if hit is not None:
         return _copy_result(hit)
 
+    # 조건을 하나도 넣지 않은 검색은 후보가 전부 같은 판정('확인 필요 — 정보 부족')이다.
+    # 이때는 1.2만 건을 판정하지 않고 건수·종류별 상위만 읽어 바로 답한다(라이브 28초 → 수십 ms).
+    if _browse_ready(catalog, profile, tag=tag, keyword=keyword, limit=limit):
+        result = _browse_result(catalog, profile, limit=limit,
+                                include_ineligible=include_ineligible,
+                                include_closed=include_closed, max_scan=max_scan,
+                                balance_kinds=balance_kinds,
+                                balance_verdicts=balance_verdicts, verdict=verdict)
+        cache.put(cache_key, result, len(result["results"]))
+        return _copy_result(result)
+
     pool = _candidate_pool(catalog, profile, max_scan=max_scan, tag=tag, keyword=keyword,
                            include_closed=include_closed, expand_keyword=expand_keyword)
     track = profile.get("track", "all")
 
-    results = [evaluate_service(svc, profile) for svc in pool]
+    # 후보마다 결과 dict(사유·안내문·지문…)를 만들지 않고 (정렬 키, 판정) 만 남긴다.
+    # 예전에는 1.2만 건의 결과 dict 를 다 만들어 한 번 검색에 100MB 넘게 썼다(OOM).
+    candidates = [(assess(svc, profile), svc) for svc in pool]
     if not include_ineligible:
-        shown = [row for row in results if row["verdict"]["code"] != models.VERDICT_INELIGIBLE]
+        shown = [item for item in candidates
+                 if item[0][6] != models.VERDICT_INELIGIBLE]
     else:
-        shown = results
+        shown = candidates
     if expand_keyword and keyword:
         # 동의어로 넓혀 찾은 검색은 두 줄로 세운다.
         #  1) 질의어를 그대로 담은 제도 — 예전과 같은 판정 순서(_sort_key)
@@ -1310,19 +1437,19 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
             relevance[svc.service_id] = synonyms.score(svc.name, body, groups)
             if synonyms.literal_hit(svc.name, body, keyword):
                 strict_ids.add(svc.service_id)
-        direct = [row for row in shown if row.get("service_id") in strict_ids]
-        related = [row for row in shown if row.get("service_id") not in strict_ids]
-        direct.sort(key=_sort_key)
-        related.sort(key=lambda row: (-relevance.get(row.get("service_id"), 0), _sort_key(row)))
+        direct = [item for item in shown if item[1].service_id in strict_ids]
+        related = [item for item in shown if item[1].service_id not in strict_ids]
+        direct.sort(key=_candidate_key)
+        related.sort(key=lambda item: (-relevance.get(item[1].service_id, 0),
+                                       _candidate_key(item)))
         shown = direct + related
     else:
-        shown.sort(key=_sort_key)
+        shown.sort(key=_candidate_key)
     counts: Dict[str, int] = {code: 0 for code in models.VERDICT_ORDER}
-    for row in results:
-        counts[row["verdict"]["code"]] += 1
     track_counts: Dict[str, int] = {programs.TRACK_PERSONAL: 0, programs.TRACK_BUSINESS: 0}
-    for row in results:
-        track_counts[row["track"]] = track_counts.get(row["track"], 0) + 1
+    for key, svc in candidates:
+        counts[key[6]] += 1
+        track_counts[svc.track] = track_counts.get(svc.track, 0) + 1
 
     # 화면 탭 숫자 — 상한에 잘리기 전, 보여 줄 후보 전체를 센다.
     shown_counts: Dict[str, int] = {code: 0 for code in models.VERDICT_ORDER}
@@ -1330,9 +1457,9 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     kind_verdict_counts: Dict[str, Dict[str, int]] = {
         kind: {code: 0 for code in models.VERDICT_ORDER} for kind in KINDS
     }
-    for row in shown:
-        code = row["verdict"]["code"]
-        kind = _kind_of(row)
+    for key, svc in shown:
+        code = key[6]
+        kind = _kind_of({"benefit_kind": svc.benefit_kind})
         shown_counts[code] += 1
         kind_counts[kind] += 1
         kind_verdict_counts[kind][code] += 1
@@ -1340,19 +1467,20 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     # 판정 하나만 보기 — 상한에 걸렸던 '조건 확인 필요' 전체를 다시 받는 길.
     filtered = shown
     if verdict:
-        filtered = [row for row in shown if row["verdict"]["code"] == verdict]
+        filtered = [item for item in shown if item[0][6] == verdict]
     matched_total = len(filtered)
 
     cap = max(1, limit)
-    picked = _balanced_slice(filtered, cap, balance_kinds=balance_kinds,
-                             balance_verdicts=balance_verdicts)
+    picked_candidates = _slice_candidates(filtered, cap, balance_kinds=balance_kinds,
+                                          balance_verdicts=balance_verdicts)
+    picked = [evaluate_service(svc, profile) for _key, svc in picked_candidates]
 
     result = {
         "counts": counts,
         "shown_counts": shown_counts,
         "kind_counts": kind_counts,
         "kind_verdict_counts": kind_verdict_counts,
-        "scanned": len(results),
+        "scanned": len(candidates),
         "matched_total": matched_total,
         "returned": len(picked),
         "results": picked,
@@ -1369,27 +1497,143 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     return _copy_result(result)
 
 
+def _candidate_key(item: Tuple[Tuple[Any, ...], Service]) -> Tuple[Any, ...]:
+    """(정렬 키, Service) → 정렬용 키 6개(판정 코드는 뺀다)."""
+    return item[0][:6]
+
+
+def _kind_of_candidate(item: Tuple[Tuple[Any, ...], Service]) -> str:
+    return _kind_of({"benefit_kind": item[1].benefit_kind})
+
+
+def _slice_candidates(candidates: List[Tuple[Tuple[Any, ...], Service]], cap: int, *,
+                      balance_kinds: bool, balance_verdicts: bool
+                      ) -> List[Tuple[Tuple[Any, ...], Service]]:
+    """`_balanced_slice` 와 같은 규칙으로 상한만큼 자른다 — 대상이 결과 줄이 아니라 후보 묶음뿐이다."""
+    if cap >= len(candidates):
+        return list(candidates)
+    if not (balance_kinds or balance_verdicts):
+        return candidates[:cap]
+
+    def pick(items: List[Tuple[Tuple[Any, ...], Service]], budget: int,
+             group_of) -> List[Tuple[Tuple[Any, ...], Service]]:
+        groups: Dict[str, List[Tuple[Tuple[Any, ...], Service]]] = {}
+        for item in items:
+            groups.setdefault(group_of(item), []).append(item)
+        alloc = _allocate(budget, {key: len(value) for key, value in groups.items()})
+        chosen = set()
+        for key, rows_in_group in groups.items():
+            for item in rows_in_group[:alloc.get(key, 0)]:
+                chosen.add(id(item))
+        return [item for item in items if id(item) in chosen]
+
+    kind_sizes = {kind: sum(1 for item in candidates if _kind_of_candidate(item) == kind)
+                  for kind in KINDS}
+    if balance_kinds and all(kind_sizes[kind] for kind in KINDS) and cap >= 4:
+        kind_alloc = _allocate(cap, kind_sizes)
+        picked: List[Tuple[Tuple[Any, ...], Service]] = []
+        for kind in KINDS:
+            subset = [item for item in candidates if _kind_of_candidate(item) == kind]
+            budget = kind_alloc.get(kind, 0)
+            if balance_verdicts:
+                picked.extend(pick(subset, budget, lambda item: item[0][6]))
+            else:
+                picked.extend(subset[:budget])
+        chosen = {id(item) for item in picked}
+        return [item for item in candidates if id(item) in chosen]
+    if balance_verdicts:
+        return pick(candidates, cap, lambda item: item[0][6])
+    return candidates[:cap]
+
+
+# 경량 둘러보기로 답할 수 있는 최대 건수 — 이보다 큰 요청(대량 export·테스트)은
+# 예전처럼 전부 판정한다(상한을 크게 부르면 결국 대부분의 줄을 읽어야 하므로).
+BROWSE_MAX_LIMIT = 500
+
+
+def _browse_ready(catalog: Catalog, profile: Dict[str, Any], *, tag: Optional[str],
+                  keyword: Optional[str], limit: int = 0) -> bool:
+    """가벼운 둘러보기로 답할 수 있는 검색인가 — 조건이 비었고 후보가 개인 트랙뿐일 때.
+
+    태그·검색어는 색인에 없어 후보를 실제로 읽어 걸러야 하므로 이 길을 타지 않는다.
+    """
+    if limit and int(limit) > BROWSE_MAX_LIMIT:
+        return False
+    if tag or keyword:
+        return False
+    if profile.get("track") == programs.TRACK_BUSINESS:
+        return False
+    if (profile.get("business") or {}).get("declared"):
+        return False
+    if not _profile_is_empty(profile):
+        return False
+    return callable(getattr(catalog, "browse_pool", None))
+
+
+def _browse_result(catalog: Catalog, profile: Dict[str, Any], *, limit: int,
+                   include_ineligible: bool, include_closed: bool, max_scan: int,
+                   balance_kinds: bool, balance_verdicts: bool,
+                   verdict: Optional[str]) -> Dict[str, Any]:
+    """조건 없는 검색 — 후보 전부가 같은 판정이므로 집계와 상위 몇 건만으로 답을 만든다."""
+    region = profile["region"] or {}
+    cap = max(1, limit)
+    data = catalog.browse_pool(sido=region.get("sido"), sigungu=region.get("sigungu"),
+                               track=profile.get("track", "all"),
+                               business_declared=False, include_closed=include_closed,
+                               max_scan=max_scan, per_kind=cap, today=date.today())
+    total = int(data.get("total") or 0)
+    by_kind_raw = data.get("by_kind") or {}
+    by_kind = {kind: int(by_kind_raw.get(kind) or 0) for kind in KINDS}
+    groups = {kind: list((data.get("services") or {}).get(kind) or []) for kind in KINDS}
+    code = models.VERDICT_INSUFFICIENT
+
+    counts: Dict[str, int] = {item: 0 for item in models.VERDICT_ORDER}
+    counts[code] = total
+    shown_counts: Dict[str, int] = dict(counts)
+    kind_verdict_counts: Dict[str, Dict[str, int]] = {
+        kind: {item: (by_kind[kind] if item == code else 0) for item in models.VERDICT_ORDER}
+        for kind in KINDS
+    }
+    matched = 0 if (verdict and verdict != code) else total
+    picked: List[Service] = []
+    if matched:
+        if balance_kinds and cap >= 4 and all(by_kind[kind] for kind in KINDS):
+            alloc = _allocate(cap, by_kind)
+            picked = [svc for kind in KINDS for svc in groups[kind][:alloc.get(kind, 0)]]
+            picked.sort(key=browse_sort_key)
+        else:
+            merged = sorted([svc for kind in KINDS for svc in groups[kind]],
+                            key=browse_sort_key)
+            picked = merged[:cap]
+    rows = [evaluate_service(svc, profile) for svc in picked]
+    return {
+        "counts": counts,
+        "shown_counts": shown_counts,
+        "kind_counts": dict(by_kind),
+        "kind_verdict_counts": kind_verdict_counts,
+        "scanned": total,
+        "matched_total": matched,
+        "returned": len(rows),
+        "results": rows,
+        "truncated": matched > cap,
+        "verdict_filter": verdict,
+        "ineligible_hidden": 0 if include_ineligible else counts[models.VERDICT_INELIGIBLE],
+        "track": profile.get("track", "all"),
+        "track_counts": {programs.TRACK_PERSONAL: total, programs.TRACK_BUSINESS: 0},
+        "closed_hidden": getattr(catalog, "expired_count", catalog.closed_business_count)
+        if not include_closed else 0,
+    }
+
+
 def _sort_key(row: Dict[str, Any]) -> Tuple[int, int, int, int, int, str]:
     code = row["verdict"]["code"]
     region_level = (row.get("region") or {}).get("level") or "nationwide"
     region_tier = {"sigungu": 0, "sido": 1}.get(region_level, 2)
     kind_rank = 0 if row.get("benefit_kind", "grant") == "grant" else 1
-    # 내가 입력한 조건(상황·가구·성별·자녀·업종)에 직접 맞물린 제도일수록 우선 노출
-    specific_hits = 0
-    for r in row.get("why") or []:
-        if r.get("state") == PASS and r.get("group") in ("life", "household", "business", "gender"):
-            if "가리지 않는" not in (r.get("reason_ko") or ""):
-                specific_hits += 1
     deadline = row.get("application", {}).get("deadline") or {}
-    end = deadline.get("end_date") or "9999-12-31"
-    days_left = deadline.get("days_left")
-    if days_left is not None and 0 <= days_left <= 7:
-        urgency = 0
-    elif deadline.get("closing_soon"):
-        urgency = 1
-    else:
-        urgency = 2
-    return (models.SORT_INDEX.get(code, 9), kind_rank, -specific_hits, region_tier, urgency, end)
+    return (models.SORT_INDEX.get(code, 9), kind_rank,
+            -_specific_hits(row.get("why") or []), region_tier,
+            _urgency(deadline), str(deadline.get("end_date") or "9999-12-31"))
 
 
 def evaluate_by_id(catalog: Catalog, service_id: str,

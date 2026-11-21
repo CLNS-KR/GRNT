@@ -268,17 +268,26 @@ class PseoItemsCacheTest(unittest.TestCase):
             pseo._collect = original
         self.assertIs(catalog.memo["pseo_items"], stored)
         self.assertEqual([page["slug"] for page in first], [page["slug"] for page in second])
-        self.assertEqual([len(page["services"]) for page in first],
-                         [len(page["services"]) for page in second])
+        self.assertEqual([page["count"] for page in first],
+                         [page["count"] for page in second])
 
     def test_items_match_fresh_build(self):
         catalog = sample_catalog()
         cached = pseo.items(catalog)
         fresh = pseo._build_items(catalog)
-        self.assertEqual([(page["slug"], len(page["services"]), page["indexable"])
+        self.assertEqual([(page["slug"], page["count"], page["indexable"])
                           for page in cached],
-                         [(page["slug"], len(page["services"]), page["indexable"])
+                         [(page["slug"], page["count"], page["indexable"])
                           for page in fresh])
+
+    def test_items_do_not_keep_service_objects(self):
+        """메모 상주 방지 — 페이지 목록은 Service 객체가 아니라 id·건수만 들고 있어야 한다."""
+        catalog = sample_catalog()
+        stored = catalog.memo.get("pseo_items") or tuple(pseo._build_items(catalog))
+        for page in stored:
+            self.assertNotIn("services", page)
+            self.assertIsInstance(page["service_ids"], tuple)
+            self.assertTrue(all(isinstance(sid, str) for sid in page["service_ids"]))
 
 
 @unittest.skipUnless(HAS_DATA, "동기화 산출물이 없어 건너뜁니다")

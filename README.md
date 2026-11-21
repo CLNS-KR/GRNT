@@ -386,6 +386,33 @@ sqlite3 data/app.sqlite "select id, day, topic, contact, message from inquiries 
 
 ---
 
+## 3-8. 메모리·속도·색인 정리 (0.4.3)
+
+`Pilotage(@pilot)` 님 측 코드·라이브 검수 리포트의 긴급/높음/운영 개선점을 재검증해 고친 버전입니다.
+Render 무료(0.1 vCPU·512MB)에서 **OOM 과 28초 지연**을 만들던 지점이 모두 사라졌습니다.
+
+| 항목 | 0.4.2 | 0.4.3 |
+|---|---|---|
+| `/healthz` | `len(catalog.services)` 로 매 호출마다 SQLite 13,130행 재적재(라이브 10.4~14.0초) | `catalog.stats()` 캐시로 **수 ms** |
+| 후보 목록 캐시 | 목록 **개수**만 32개 제한 → 지역·키워드를 바꿔 13~20회 검색하면 Service 객체 36,000개+(130MB+) | **담긴 객체 수 상한**(`POOL_CACHE_MAX_ITEMS`) LRU — 상한을 넘으면 오래된 목록부터 축출 |
+| 판정 루프 | 후보 1.2만 건의 결과 dict(사유·안내문·지문)를 **전부 생성**해 한 번 검색에 100MB+ 피크 | `assess()` 로 (정렬 키, 판정)만 훑고, 화면에 돌려줄 줄만 `evaluate_service` 로 생성 |
+| 프로필 없는 검색 | 후보 전부 판정 — 로컬 2.6초·라이브 28초 | 조건이 비면 후보가 모두 같은 판정이라, SQL 색인의 건수+종류별 상위만 읽음 — **로컬 0.11초** |
+| pSEO 페이지 목록 | `memo["pseo_items"]` 가 Service 객체 목록 전체를 고정(118~171MB) | 페이지마다 **제도 id·건수만** 보관, 그릴 때 앞 60건만 로드(메모 1.5MB) |
+| `/regions/{slug}` 집계 | `catalog.services` 로 1.3만 건 일괄 적재(첫 방문 40MB+) | 스트림 1회 + 시·도별 상위 8건만 유지(트레이스 피크 3.7MB) |
+| 마감 캘린더 | 1.3만 건을 읽어 파이썬에서 마감일 비교 | SQL 색인 `deadline_end` 로 **기간에 걸리는 줄만** 읽음 |
+| pSEO `<h1>` | 모든 페이지가 브랜드명(`GRNT · …`) | 페이지 주제(예: `청년 지원금`, `서울특별시 지자체 지원금 현황`) |
+| `/s/seoul` ↔ `/regions/seoul` | 제목·의도가 거의 같음 | `/s/{시도}` = **지원금 목록**(대상·금액·기한), `/regions/{시도}` = **지자체 지원금 현황**(시·군·구별 건수·마감) + 상호 링크 |
+| 동시 처리 | `ThreadingHTTPServer` 무제한 | 동시 처리 세마포어(기본 4) + IP별 분당 요청 상한(일반 300·무거운 120) — 넘으면 429/503, `/healthz` 는 예외 |
+| 문의 유실 | 무료 플랜 재배포 시 SQLite 초기화 | 접수 로그(번호·주제만) + 선택 기능 `GRNT_INQUIRY_SINK`(JSONL) · `GRNT_INQUIRY_WEBHOOK`(알림) |
+
+SQLite 색인에는 `benefit_kind`·`deadline_end` 열과 `index_schema` 버전이 붙었습니다. 예전 DB 는
+로더가 자동으로 다시 만듭니다(없으면 경량 조회가 빈 결과를 냅니다).
+
+환경변수(선택): `GRNT_MAX_CONCURRENCY`(기본 4) · `GRNT_RATE_LIMIT`(분당, 0이면 끔) ·
+`GRNT_RATE_LIMIT_HEAVY` · `GRNT_INQUIRY_SINK` · `GRNT_INQUIRY_WEBHOOK`.
+
+---
+
 ## 4. 일자별 스냅샷(변경 이력)
 
 지원사업 공고는 기간·예산·자격이 조용히 바뀝니다. 그래서 동기화할 때마다
@@ -577,6 +604,8 @@ healthCheck `/healthz`). 서버는 공공 API 키가 필요 없고, `.env` 없�
 | 환경변수(실데이터 동기화 시에만) | `DATA_GO_KR_SERVICE_KEY` — 서버 기동에는 불필요, Render Shell 동기화에만 |
 | 환경변수(검색엔진 소유확인, 선택) | `GOOGLE_SITE_VERIFICATION` · `NAVER_SITE_VERIFICATION` · `SITE_VERIFICATION_FILES` — 아래 8-1 |
 | 환경변수(통계·문의 보존, 선택) | `GRNT_STATS_PATH` — 익명 카운터와 문의 접수를 따로 둘 SQLite 경로. 비어 있으면 `SUBSIDY_KR_DB` |
+| 환경변수(동시 처리·빈도 상한, 선택) | `GRNT_MAX_CONCURRENCY`(기본 4) · `GRNT_RATE_LIMIT`(분당 300) · `GRNT_RATE_LIMIT_HEAVY`(분당 120) — `/healthz` 는 제외 |
+| 환경변수(문의 유실 대비, 선택) | `GRNT_INQUIRY_SINK`(JSONL 파일) · `GRNT_INQUIRY_WEBHOOK`(알림 URL) |
 
 ### 8-1. 검색엔진 소유확인(구글 서치콘솔·네이버 서치어드바이저)
 
@@ -605,7 +634,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.2` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.3` 태그로 게시합니다.
 
 ## 9. 라이선스
 

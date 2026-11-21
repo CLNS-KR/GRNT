@@ -332,34 +332,54 @@ def tool_deadline_calendar(args: Dict[str, Any], catalog: Catalog,
     until = today + timedelta(days=days)
     sido = str(args.get("sido") or "").strip()
     sigungu = str(args.get("sigungu") or "").strip()
-    services = catalog.services
+    keyword = str(args.get("keyword") or "").strip()
+    scoped_sido = scoped_sigungu = ""
     if sido or sigungu:
         block = regions.region_block(sido, sigungu)
         if block["level"] in ("sido", "sigungu"):
-            services = catalog.by_region(block.get("sido"), block.get("sigungu"),
-                                         include_national=True)
-    if track != "all":
-        services = [svc for svc in services if svc.track == track]
-    keyword = str(args.get("keyword") or "").strip()
-    if keyword:
-        services = [svc for svc in services if keyword in svc.name]
-
-    by_day: Dict[str, List[Dict[str, Any]]] = {}
+            scoped_sido = block.get("sido") or ""
+            scoped_sigungu = block.get("sigungu") or ""
+    services: List[Any] = []
     unscheduled = 0
     expired = 0
+    # 마감일 범위를 SQL 색인에서 먼저 거른다 — 예전에는 1.3만 건을 Service 객체로 읽어
+    # 파이썬에서 걸렀다(요청마다 40MB+·수 초). 이제 그 기간에 걸리는 줄만 읽는다.
+    light = None
+    if callable(getattr(catalog, "deadline_between", None)):
+        light = catalog.deadline_between(
+            start=today, until=until, track=track,
+            sido=scoped_sido or None, sigungu=scoped_sigungu or None,
+            keyword=keyword or None)
+        services = light["services"]
+        unscheduled = int(light.get("unscheduled") or 0)
+        expired = int(light.get("expired") or 0)
+    else:   # 경량 조회가 없는 카탈로그(테스트용 객체 등) — 예전과 같은 방식
+        services = catalog.services
+        if scoped_sido:
+            services = catalog.by_region(scoped_sido, scoped_sigungu or None,
+                                         include_national=True)
+        if track != "all":
+            services = [svc for svc in services if svc.track == track]
+        if keyword:
+            services = [svc for svc in services if keyword in svc.name]
+
+    by_day: Dict[str, List[Dict[str, Any]]] = {}
     for svc in services:
         deadline = svc.deadline
         end = deadline.get("end_date")
         if not end:
-            unscheduled += 1
+            if light is None:
+                unscheduled += 1
             continue
         try:
             end_date = date.fromisoformat(str(end))
         except ValueError:
-            unscheduled += 1
+            if light is None:
+                unscheduled += 1
             continue
         if end_date < today:
-            expired += 1
+            if light is None:
+                expired += 1
             continue
         if end_date > until:
             continue
@@ -1044,6 +1064,15 @@ def submit_inquiry(payload: Any, store: Any = None,
             "echoed_back": False,
             "in_usage_stats": False,
             "keep_days": usage.INQUIRY_KEEP_DAYS,
+        },
+        # 무료 플랜은 영구 디스크가 없어 재배포 때 SQLite 가 초기화된다 — 어디에 남았는지 밝힌다.
+        "persistence": {
+            **(saved.get("persistence") or {}),
+            "note_ko": (
+                "접수 즉시 서버 저장소에 기록했습니다. 무료 플랜은 영구 디스크가 없어 "
+                "재배포 시 기록이 초기화될 수 있으니, 오래 보관하려면 운영자가 "
+                "GRNT_STATS_PATH(영속 디스크)나 GRNT_INQUIRY_SINK 파일을 지정하면 됩니다."
+            ),
         },
         "topics": inquiry_topics(),
         "checked_at": _now(),

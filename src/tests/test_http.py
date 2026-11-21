@@ -92,7 +92,7 @@ class HttpTest(unittest.TestCase):
     def test_pseo_routes(self):
         status, body, _ = self._get("/s/")
         self.assertEqual(status, 200)
-        self.assertIn("주제별 지원금", body)
+        self.assertIn("주제·지역별 지원금", body)
         status, body, _ = self._get("/s/cheongnyeon")
         self.assertEqual(status, 200)
         self.assertIn("청년", body)

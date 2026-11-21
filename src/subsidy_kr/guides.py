@@ -1568,6 +1568,12 @@ def _related(catalog: Any, guide: Dict[str, Any], limit: int = 5) -> Tuple[int, 
 # ---------------------------------------------------------------------------
 # 렌더
 # ---------------------------------------------------------------------------
+# 페이지 머리의 브랜드 문구는 p 로 두고, h1 은 그 페이지의 질문(주제)에 쓴다.
+PAGE_HEAD_CSS = (
+    ".brand-name{margin:0;font-size:18px;letter-spacing:-.2px;font-weight:700}"
+    ".brand-name a{color:inherit;text-decoration:none}"
+    "h1.page-title{font-size:19px;margin:10px 0 0;letter-spacing:-.3px;line-height:1.35}"
+)
 GUIDE_CSS = """
 .related{margin:6px 0 0;padding-left:18px;line-height:1.8;font-size:13.5px}
 """
@@ -1632,14 +1638,14 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 <meta name="twitter:card" content="summary">
 <link rel="canonical" href="{canonical}">
 {scripts}
-<style>{BASE_CSS}{GUIDE_CSS}</style>
+<style>{BASE_CSS}{PAGE_HEAD_CSS}{GUIDE_CSS}</style>
 </head>
 <body>
 <div class="wrap">
 <header class="top">
   <div class="brand">
     <div class="mark" aria-hidden="true">G</div>
-    <div><h1>GRNT · 지원금 가이드</h1>
+    <div><p class="brand-name"><a href="/">GRNT · 지원금 가이드</a></p>
     <p class="en">KOREA GRANT &amp; SUBSIDY INTELLIGENCE</p></div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1721,7 +1727,7 @@ def render_index(catalog: Any) -> str:
     body = f"""
 <main>
   <section class="card" style="margin-top:16px">
-    <h2>자주 묻는 지원금 질문 {GUIDE_COUNT}개</h2>
+    <h1 class="page-title">자주 묻는 지원금 질문 {GUIDE_COUNT}개</h1>
     <p class="sub">ChatGPT·Perplexity·네이버에 가장 많이 묻는 지원금 질문을 한 페이지씩
     정리했습니다. 각 페이지에 <strong>한 줄 기준</strong>, <strong>확인해야 할 조건</strong>,
     <strong>지금 열려 있는 관련 공고</strong>, <strong>흔한 오해</strong>,
@@ -1789,7 +1795,7 @@ def render_item(slug: str, catalog: Any) -> Optional[str]:
   <span>{_esc(category_label)}</span></p>
   <section class="card" style="margin-top:12px">
     <span class="pill">{_esc(category_label)}</span>
-    <h2 style="margin-top:10px">{_esc(guide["question"])}</h2>
+    <h1 class="page-title">{_esc(guide["question"])}</h1>
     <div class="answer"><b>한 줄 기준</b>{_esc(guide["one_line"])}</div>
     <div class="links" style="margin-top:14px">
       <a class="pill" href="{q_url}">내 조건으로 확인하기</a>

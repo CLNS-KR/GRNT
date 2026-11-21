@@ -24,7 +24,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Dict, Optional
@@ -76,6 +78,11 @@ INQUIRY_CONTACT_MAX = 120
 INQUIRY_MESSAGE_MAX = 500
 INQUIRY_DAILY_CAP = 200      # 같은 날 접수 상한(스팸으로 무료 인스턴스 디스크를 채우지 않게)
 INQUIRY_KEEP_DAYS = 180      # 회신 목적이 끝난 연락처 보관 기간
+# 문의 유실 대비 — 무료 플랜은 영구 디스크가 없어 재배포 때 SQLite 가 초기화된다.
+# 아래 두 환경변수는 **운영자(서비스 주인)가 직접 켜는 선택 기능**이며 기본은 꺼져 있다.
+INQUIRY_SINK_ENV = "GRNT_INQUIRY_SINK"        # 접수 1건당 JSON 한 줄을 덧붙일 파일(영속 디스크)
+INQUIRY_WEBHOOK_ENV = "GRNT_INQUIRY_WEBHOOK"  # 접수 즉시 알림을 받을 운영자 엔드포인트(HTTPS)
+INQUIRY_WEBHOOK_TIMEOUT = 3.0
 
 _EMAIL_RE = re.compile(r"[0-9A-Za-z._%+\-]+@[0-9A-Za-z.\-]+\.[A-Za-z]{2,}")
 _URL_RE = re.compile(r"(?i)(?:https?://|www\.)\S+")
@@ -286,6 +293,7 @@ def save_inquiry(store: Any, data: Dict[str, Any], day: Optional[str] = None) ->
     """정리된 문의를 저장한다 — 같은 날 같은 내용은 한 번만 남긴다.
 
     저장에 실패해도 예외를 밖으로 던지지 않고 `stored: False`를 돌려준다(응답이 깨지지 않게).
+    저장 뒤에는 **선택 기능**인 파일 미러·알림 훅을 시도한다(둘 다 기본 꺼짐).
     """
     stamp = day or today_kst()
     if store is None:
@@ -301,7 +309,76 @@ def save_inquiry(store: Any, data: Dict[str, Any], day: Optional[str] = None) ->
         row_id = store.add_inquiry(stamp, topic, contact, message)
     except Exception:  # noqa: BLE001 - 저장 실패가 응답 형식을 바꾸지 않게
         return {"stored": False, "duplicate": False, "error": "store_unavailable"}
-    return {"stored": True, "duplicate": False, "receipt": f"I{int(row_id):05d}"}
+    receipt = f"I{int(row_id):05d}"
+    return {"stored": True, "duplicate": False, "receipt": receipt,
+            "persistence": mirror_inquiry(data, stamp=stamp, receipt=receipt)}
+
+
+def mirror_inquiry(data: Dict[str, Any], *, stamp: str, receipt: str) -> Dict[str, Any]:
+    """문의 유실 대비 — 파일 미러(`GRNT_INQUIRY_SINK`)와 알림 훅(`GRNT_INQUIRY_WEBHOOK`).
+
+    둘 다 운영자가 환경변수로 켜야 동작하고, 실패해도 접수 응답을 막지 않는다.
+    내보내는 값은 사용자가 문의 카드에 직접 적은 연락처·주제·내용뿐이며(회신 목적),
+    나이·지역·소득 같은 판정 입력은 여기까지 오지 않는다.
+    """
+    result: Dict[str, Any] = {"stored_in_database": True, "mirrored_to_file": False,
+                              "notified_hook": False}
+    sink = str(os.environ.get(INQUIRY_SINK_ENV) or "").strip()
+    if sink:
+        result["mirrored_to_file"] = _append_inquiry_sink(sink, data, stamp, receipt)
+    hook = str(os.environ.get(INQUIRY_WEBHOOK_ENV) or "").strip()
+    if hook:
+        result["notified_hook"] = _notify_inquiry_hook(hook, data, stamp, receipt)
+    return result
+
+
+def _append_inquiry_sink(path: str, data: Dict[str, Any], stamp: str, receipt: str) -> bool:
+    """접수 1건을 JSON 한 줄로 덧붙인다(영속 디스크에 두면 재배포에도 남는다)."""
+    line = json.dumps({"receipt": receipt, "day": stamp, "topic": data.get("topic"),
+                       "contact": data.get("contact"), "message": data.get("message"),
+                       "received_at": datetime.now(KST).isoformat(timespec="seconds")},
+                      ensure_ascii=False, separators=(",", ":"))
+    try:
+        directory = os.path.dirname(os.path.abspath(path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        return True
+    except OSError:
+        return False
+
+
+def _notify_inquiry_hook(url: str, data: Dict[str, Any], stamp: str, receipt: str) -> bool:
+    """접수 사실을 운영자 엔드포인트로 보낸다 — 응답을 기다리지 않고 스레드에서.
+
+    실패해도 조용히 넘긴다(접수 자체는 이미 끝났다). http(s) 만 허용한다.
+    """
+    if not url.lower().startswith(("http://", "https://")):
+        return False
+    payload = json.dumps({"receipt": receipt, "day": stamp, "topic": data.get("topic"),
+                          "contact": data.get("contact"), "message": data.get("message"),
+                          "source": "grnt"},
+                         ensure_ascii=False).encode("utf-8")
+
+    def _post() -> None:
+        import urllib.request
+
+        request = urllib.request.Request(
+            url, data=payload, method="POST",
+            headers={"Content-Type": "application/json; charset=utf-8"})
+        try:
+            urllib.request.urlopen(request, timeout=INQUIRY_WEBHOOK_TIMEOUT).close()
+        except Exception:  # noqa: BLE001 - 알림 실패가 접수를 되돌리지 않는다
+            pass
+
+    try:
+        threading.Thread(target=_post, name="inquiry-hook", daemon=True).start()
+    except RuntimeError:
+        return False
+    return True
 
 
 def inquiry_summary(store: Any) -> Dict[str, Any]:

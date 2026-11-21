@@ -195,7 +195,10 @@ class RegionHubRenderTest(unittest.TestCase):
             self.assertIsNotNone(page, slug)
             self.assertIn("<html lang=\"ko\">", page)
             self.assertIn(" 지원금", page)
-            self.assertEqual(page.count("<h2>"), 1, slug)
+            # h1 은 그 페이지의 주제(시·도)이고, 브랜드 문구는 h1 이 아니다.
+            self.assertEqual(page.count("<h1"), 1, slug)
+            self.assertIn("지자체 지원금 현황</h1>", page, slug)
+            self.assertNotIn("<h1>GRNT", page, slug)
         self.assertIsNone(regions.render_item("no-such-region", self.catalog))
 
     def test_index_links_every_region(self):

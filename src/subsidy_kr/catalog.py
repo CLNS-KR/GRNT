@@ -24,9 +24,13 @@ import json
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import conditions, deadlines, programs, regions, sample_data, sample_programs, synonyms
+
+# 프로필 없는 둘러보기 결과(건수+종류별 상위 목록)를 몇 조합까지 기억할지 — 작은 요약이라
+# 6개만 둔다(지역·트랙·마감 조합이 바뀌어도 메모리가 늘지 않는다).
+BROWSE_CACHE_MAX = 6
 
 # 서비스분야 → 화면용 짧은 이름
 FIELD_LABELS: Dict[str, str] = {
@@ -50,8 +54,7 @@ FIELD_LABELS: Dict[str, str] = {
     "R&D": "R&D",
 }
 
-CRITERIA_FLAGS: List[tuple] = [
-    ("재산", "재산 기준 포함"),
+CRITERIA_FLAGS: List[tuple] = [    ("재산", "재산 기준 포함"),
     ("소득인정액", "소득인정액(재산 반영) 기준"),
     ("거주기간", "거주기간 요건"),
     ("전입", "전입 요건"),
@@ -350,6 +353,34 @@ def normalize_service(raw: Dict[str, Any], source: str = "sample") -> Service:
     )
 
 
+def benefit_kind_of(service: "Service") -> str:
+    """`grant`|`program` — SQLite 색인과 같은 값을 내는 한 곳."""
+    return "program" if service.benefit_kind == "program" else "grant"
+
+
+def browse_sort_key(service: "Service", today: Optional[date] = None
+                    ) -> Tuple[int, int, int, int, str]:
+    """프로필 없이 둘러보는 검색의 정렬 키 — `engine._sort_key` 의 뒤쪽 다섯 값과 같다.
+
+    판정 조건이 비어 있으면 후보가 모두 '확인 필요(정보 부족)'이고 조건 일치 수도 0 이라
+    `engine._sort_key` 에서 남는 순서는 **종류(지원금 먼저)·지역 특화도·마감 임박도·마감일**
+    뿐이다. 1.2만 건을 판정하지 않고도 같은 순서를 낼 수 있게 그 부분만 뽑아 둔다
+    (`test_lightweight_queries.py` 가 `engine._sort_key` 와 같은 순서인지 확인한다).
+    """
+    kind_rank = 0 if benefit_kind_of(service) == "grant" else 1
+    level = (service.region or {}).get("level") or "nationwide"
+    region_tier = {"sigungu": 0, "sido": 1}.get(level, 2)
+    deadline = service.deadline or {}
+    days_left = deadline.get("days_left")
+    if days_left is not None and 0 <= days_left <= 7:
+        urgency = 0
+    elif deadline.get("closing_soon"):
+        urgency = 1
+    else:
+        urgency = 2
+    return (kind_rank, 0, region_tier, urgency, str(deadline.get("end_date") or "9999-12-31"))
+
+
 def search_text(service: "Service") -> str:
     """검색·매칭에 쓰는 문서 본문(이름·목적·대상·내용·기관·해시태그).
 
@@ -358,6 +389,50 @@ def search_text(service: "Service") -> str:
     """
     return (f"{service.name} {service.purpose} {service.target} {service.content} "
             f"{service.agency} {' '.join(service.business.get('hashtags') or [])}")
+
+
+def _browse_from_services(rows: List[Service], *, max_scan: int = 20000,
+                          per_kind: int = 20,
+                          today: Optional[date] = None) -> Dict[str, Any]:
+    """목록에서 집계와 종류별 상위 목록만 뽑는다(`browse_pool` 의 메모리판)."""
+    scoped = list(rows)[:max(0, int(max_scan))]
+    per = max(1, int(per_kind))
+    by_kind: Dict[str, int] = {"grant": 0, "program": 0}
+    top: Dict[str, List[Service]] = {"grant": [], "program": []}
+    for svc in sorted(scoped, key=browse_sort_key):
+        kind = benefit_kind_of(svc)
+        by_kind[kind] += 1
+        if len(top[kind]) < per:
+            top[kind].append(svc)
+    return {"total": len(scoped), "by_kind": by_kind, "services": top}
+
+
+def _deadline_from_services(rows: Iterable[Service], *, start: date, until: date,
+                            keyword: Optional[str] = None) -> Dict[str, Any]:
+    """마감일이 `start`~`until` 사이인 제도만 골라 센다(`deadline_between` 의 공통 로직)."""
+    word = str(keyword or "").strip()
+    total = unscheduled = expired = 0
+    found: List[Service] = []
+    for svc in rows:
+        if word and word not in svc.name:
+            continue
+        total += 1
+        end = (svc.deadline or {}).get("end_date")
+        if not end:
+            unscheduled += 1
+            continue
+        try:
+            end_date = date.fromisoformat(str(end))
+        except ValueError:
+            unscheduled += 1
+            continue
+        if end_date < start:
+            expired += 1
+            continue
+        if end_date > until:
+            continue
+        found.append(svc)
+    return {"services": found, "total": total, "unscheduled": unscheduled, "expired": expired}
 
 
 class Catalog:
@@ -384,8 +459,25 @@ class Catalog:
                 self._by_sido.setdefault(svc.region["sido"], []).append(svc)
 
     # --- 조회 ---------------------------------------------------------------
+    def __len__(self) -> int:
+        """전체 건수 — `len(catalog.services)` 처럼 목록을 새로 만들지 않는다."""
+        return len(self.services)
+
     def get(self, service_id: str) -> Optional[Service]:
         return self.by_id.get(str(service_id or "").strip())
+
+    def get_many(self, service_ids: Iterable[str]) -> List[Service]:
+        """여러 건을 id 순서대로 — 없는 id 는 건너뛴다(목록 페이지용)."""
+        out: List[Service] = []
+        for service_id in service_ids:
+            svc = self.by_id.get(str(service_id or "").strip())
+            if svc is not None:
+                out.append(svc)
+        return out
+
+    def iter_services(self) -> Iterable[Service]:
+        """전체 훑기용 스트림 — 목록을 복사하지 않는다."""
+        return iter(tuple(self.services))
 
     def all(self) -> List[Service]:
         return list(self.services)
@@ -443,6 +535,73 @@ class Catalog:
             hits.append((score, svc))
         hits.sort(key=lambda pair: (-pair[0], pair[1].name))
         return [svc for _score, svc in hits[:max(1, limit)]]
+
+    # --- 경량 조회 (프로필 없는 검색 · 마감 캘린더) --------------------------
+    def _scope_services(self, *, sido: Optional[str] = None, sigungu: Optional[str] = None,
+                        track: str = "all", business_declared: bool = False,
+                        include_closed: bool = False) -> List[Service]:
+        """트랙·지역·마감으로 줄인 목록 — `query_pool` 의 SQL 과 같은 조건."""
+        province = regions.canonical_sido(sido)
+        district = regions.canonical_sigungu(province, sigungu) if province else None
+        want_business = track == programs.TRACK_BUSINESS
+        personal_only = (not want_business
+                         and (track == programs.TRACK_PERSONAL or not business_declared))
+        out: List[Service] = []
+        for svc in self.services:
+            if want_business and not svc.is_business:
+                continue
+            if personal_only and svc.is_business:
+                continue
+            if not include_closed and svc.is_expired:
+                continue
+            if province:
+                level = svc.region.get("level")
+                if level != "national":
+                    if svc.region.get("sido") != province:
+                        continue
+                    if district and level == "sigungu" and svc.region.get("sigungu") != district:
+                        continue
+            out.append(svc)
+        return out
+
+    def browse_pool(self, *, sido: Optional[str] = None, sigungu: Optional[str] = None,
+                    track: str = "all", business_declared: bool = False,
+                    include_closed: bool = False, max_scan: int = 20000,
+                    per_kind: int = 20, today: Optional[date] = None) -> Dict[str, Any]:
+        """프로필 없이 둘러보는 검색의 집계 + 종류별 상위 목록(카탈로그 전체를 판정하지 않음).
+
+        조건이 비어 있으면 후보가 모두 같은 판정('확인 필요 — 정보 부족')이라, 건수와
+        정렬 상위 몇 건만 있으면 화면과 API 응답을 그대로 만들 수 있다.
+        """
+        key = ("browse", str(track), bool(business_declared), bool(include_closed),
+               sido or "", sigungu or "", int(max_scan), int(per_kind),
+               (today or date.today()).isoformat())
+        cache = self.memo.get("browse_pools")
+        if cache is None:
+            cache = {}
+            self.memo["browse_pools"] = cache
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        payload = _browse_from_services(
+            self._scope_services(sido=sido, sigungu=sigungu, track=track,
+                                 business_declared=business_declared,
+                                 include_closed=include_closed),
+            max_scan=max_scan, per_kind=per_kind, today=today)
+        while len(cache) >= BROWSE_CACHE_MAX:
+            cache.pop(next(iter(cache)))
+        cache[key] = payload
+        return payload
+
+    def deadline_between(self, *, start: date, until: date, track: str = "all",
+                         business_declared: bool = False, sido: Optional[str] = None,
+                         sigungu: Optional[str] = None,
+                         keyword: Optional[str] = None) -> Dict[str, Any]:
+        """마감일이 `start`~`until` 사이인 제도만 — 마감 캘린더용 경량 조회."""
+        # 캘린더의 `track="all"` 은 '두 트랙 모두'다(개인 트랙 기본값과 다르다).
+        rows = self._scope_services(sido=sido, sigungu=sigungu, track=track,
+                                    business_declared=True, include_closed=True)
+        return _deadline_from_services(rows, start=start, until=until, keyword=keyword)
 
     def stats(self) -> Dict[str, Any]:
         """카탈로그 통계(한 번 계산해 재사용). 4만 건에서도 매 요청 재계산하지 않는다."""
@@ -527,13 +686,23 @@ def read_catalog_payload(path: str) -> Any:
 
 def _sqlite_region_schema(db_path: str) -> Any:
     """SQLite 인덱스를 만든 때의 지역 택소노미 버전(없으면 None)."""
+    return _sqlite_meta_value(db_path, "region_schema")
+
+
+def _sqlite_index_schema(db_path: str) -> Any:
+    """SQLite 인덱스 스키마 버전 — 경량 조회용 열이 있는지 판단한다."""
+    return _sqlite_meta_value(db_path, "index_schema")
+
+
+def _sqlite_meta_value(db_path: str, key: str) -> Any:
+    """SQLite meta 표의 값 하나(없으면 None)."""
     import sqlite3
 
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
             row = conn.execute(
-                "SELECT value_json FROM meta WHERE key = 'region_schema'"
+                "SELECT value_json FROM meta WHERE key = ?", (key,)
             ).fetchone()
         finally:
             conn.close()
@@ -560,6 +729,7 @@ def load_catalog(path: Optional[str] = None) -> Catalog:
 
     use_sqlite = os.environ.get("SUBSIDY_KR_SQLITE", "1").strip() not in ("0", "false", "no")
     if use_sqlite:
+        from .sqlite_store import INDEX_SCHEMA as _INDEX_SCHEMA
         from .sqlite_store import SQLiteCatalog, build_sqlite_from_rows
         db_path = os.path.join(os.path.dirname(os.path.abspath(source)), "catalog.sqlite")
         try:
@@ -571,6 +741,9 @@ def load_catalog(path: Optional[str] = None) -> Catalog:
                 # 행정개편으로 지역 이름이 바뀌었는데 DB 가 옛 택소노미면 다시 만든다.
                 # (그대로 두면 sido·sigungu 로 거르는 SQL 이 새 지역 사용자를 놓친다.)
                 need_build = _sqlite_region_schema(db_path) != regions.SCHEMA_VERSION
+            if not need_build:
+                # 경량 조회용 열(benefit_kind·deadline_end)이 없는 DB 도 다시 만든다.
+                need_build = _sqlite_index_schema(db_path) != _INDEX_SCHEMA
             if need_build:
                 payload = read_catalog_payload(source)
                 rows = payload.get("services") or []

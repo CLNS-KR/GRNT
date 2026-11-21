@@ -11,11 +11,19 @@ thin content 방지 규칙
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+import html
 
 from .catalog import Catalog, tag_label
 from . import regions, site_verification
 
 MIN_INDEX_ITEMS = 5
+# 페이지 머리의 브랜드 문구는 h1 이 아니라 p 로, h1 은 페이지 주제에 쓴다(검색엔진이 제목을 고를 때
+# 브랜드명이 아니라 주제를 잡게 하려는 것).
+PAGE_CSS = (
+    ".brand-name{margin:0;font-size:18px;letter-spacing:-.2px;font-weight:700}"
+    ".brand-name a{color:inherit;text-decoration:none}"
+    "h1.page-title{font-size:20px;margin:0 0 6px;letter-spacing:-.3px}"
+)
 # 한 페이지에 보여 줄 최대 제도 수(실데이터에서 400건짜리 주제도 한 장에 담기지 않게)
 MAX_ROWS_PER_PAGE = 60
 
@@ -64,45 +72,86 @@ SLUG_TO_SIDO = regions.SLUG_TO_SIDO
 
 
 def _collect(all_services: List[Any], spec: Dict[str, Any]) -> List[Any]:
+    """(호환용) 서비스 목록에서 한 페이지의 제도를 고른다 — 테스트·스크립트가 쓴다."""
     out = []
     for svc in all_services:
-        if spec.get("tag") and spec["tag"] not in svc.tags:
-            continue
-        if spec.get("keyword"):
-            word = spec["keyword"]
-            if word not in f"{svc.name} {svc.target} {svc.content}":
-                continue
-        if spec.get("sido") and svc.region.get("sido") != spec["sido"]:
-            continue
-        if spec.get("national") and svc.region.get("level") != "national":
+        if not _matches(svc, spec):
             continue
         out.append(svc)
     out.sort(key=lambda svc: (svc.region.get("level") == "national", svc.name))
     return out
 
 
-def _build_items(catalog: Catalog) -> List[Dict[str, Any]]:
-    """페이지 목록을 실제로 만든다(카탈로그 전체를 주제·지역별로 1회만 훑는다)."""
-    all_services = catalog.services
-    pages: List[Dict[str, Any]] = []
+def _matches(svc: Any, spec: Dict[str, Any]) -> bool:
+    if spec.get("tag") and spec["tag"] not in svc.tags:
+        return False
+    if spec.get("keyword"):
+        word = spec["keyword"]
+        if word not in f"{svc.name} {svc.target} {svc.content}":
+            return False
+    if spec.get("sido") and svc.region.get("sido") != spec["sido"]:
+        return False
+    if spec.get("national") and svc.region.get("level") != "national":
+        return False
+    return True
+
+
+def _page_specs() -> List[Dict[str, Any]]:
+    specs: List[Dict[str, Any]] = []
     for spec in TOPICS:
-        services = _collect(all_services, spec)
-        if not services:
-            continue
-        pages.append({
-            "slug": spec["slug"], "kind": "topic", "title": spec["title"],
-            "intro": spec["intro"], "services": services,
-            "indexable": len(services) >= MIN_INDEX_ITEMS,
-        })
+        specs.append({"slug": spec["slug"], "kind": "topic", "title": spec["title"],
+                      "intro": spec["intro"], "tag": spec.get("tag"),
+                      "keyword": spec.get("keyword"), "sido": ""})
     for sido, slug in SIDO_SLUGS.items():
-        services = _collect(all_services, {"sido": sido})
-        if not services:
+        specs.append({"slug": slug, "kind": "region", "title": _region_title(sido),
+                      "intro": _region_intro(sido), "tag": None, "keyword": None,
+                      "sido": sido})
+    return specs
+
+
+def _region_title(sido: str) -> str:
+    return f"{sido} 지원금 목록"
+
+
+def _region_intro(sido: str) -> str:
+    return (f"{sido} 소관 공고와 전국 공통 제도를 한 목록으로 모았습니다. 대상·지원내용·"
+            "신청기한·문의처를 그대로 확인할 수 있고, 시·군·구별 공고 수와 마감 임박 "
+            "현황은 지역 허브에서 봅니다.")
+
+
+def _build_items(catalog: Catalog) -> List[Dict[str, Any]]:
+    """페이지 목록을 만든다(카탈로그를 한 번만 훑는다).
+
+    페이지마다 **제도 id 만** 담는다. 예전에는 `Service` 객체 목록을 통째로 붙들어
+    `/s/` 를 한 번 열면 118~171MB 가 상주했다(Render 512MB OOM 원인). 화면에 그릴 때는
+    필요한 앞 60건만 `catalog.get_many(...)` 로 읽는다.
+    """
+    specs = _page_specs()
+    for page in specs:
+        page["ids"] = []          # (전국 여부, 이름, id) — 정렬 뒤 id 만 남긴다
+        page["local"] = 0
+        page["missing"] = 0
+    for svc in catalog.iter_services():
+        national = svc.region.get("level") == "national"
+        for page in specs:
+            if not _matches(svc, page):
+                continue
+            page["ids"].append((national, svc.name, svc.service_id))
+            if not national:
+                page["local"] += 1
+            if not svc.has_criteria:
+                page["missing"] += 1
+    pages: List[Dict[str, Any]] = []
+    for page in specs:
+        if not page["ids"]:
             continue
+        page["ids"].sort()
+        ids = [service_id for _national, _name, service_id in page["ids"]]
         pages.append({
-            "slug": slug, "kind": "region", "title": f"{sido} 지원금",
-            "intro": f"{sido} 소관 제도와 전국 제도를 함께 정리했습니다.",
-            "services": services,
-            "indexable": len(services) >= MIN_INDEX_ITEMS,
+            "slug": page["slug"], "kind": page["kind"], "title": page["title"],
+            "intro": page["intro"], "count": len(ids), "service_ids": tuple(ids),
+            "local": int(page["local"]), "missing": int(page["missing"]),
+            "indexable": len(ids) >= MIN_INDEX_ITEMS,
         })
     return pages
 
@@ -133,34 +182,35 @@ def indexable_paths(catalog: Catalog) -> List[str]:
     return ["/s/"] + [f"/s/{page['slug']}" for page in items(catalog) if page["indexable"]]
 
 
-def _page(title: str, description: str, body: str, *, noindex: bool = False,
+def _page(title: str, description: str, body: str, *, heading: str, noindex: bool = False,
           canonical_path: str = "/s/") -> str:
     from . import static_files
     from .web_ui import BASE_CSS
 
     robots = "noindex,follow" if noindex else "index,follow"
     canonical = static_files.base_url() + canonical_path
+    esc = html.escape
     return f"""<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{title}</title>
-<meta name="description" content="{description}">
+<title>{esc(title)}</title>
+<meta name="description" content="{esc(description)}">
 <meta name="robots" content="{robots}">
-{site_verification.meta_tags()}<meta property="og:title" content="{title}">
-<meta property="og:description" content="{description}">
+{site_verification.meta_tags()}<meta property="og:title" content="{esc(title)}">
+<meta property="og:description" content="{esc(description)}">
 <meta property="og:locale" content="ko_KR">
 <link rel="canonical" href="{canonical}">
-<style>{BASE_CSS}</style>
+<style>{BASE_CSS}{PAGE_CSS}</style>
 </head>
 <body>
 <div class="wrap">
 <header class="top">
   <div class="brand">
     <div class="mark" aria-hidden="true">G</div>
-    <div><h1>GRNT · 개인·창업 지원금 판정기</h1>
+    <div><p class="brand-name"><a href="/">GRNT · 개인·창업 지원금 판정기</a></p>
     <p class="en">KOREA GRANT &amp; SUBSIDY INTELLIGENCE</p></div>
   </div>
   <div><a class="pill" href="/">내 조건으로 판정하기</a></div>
@@ -223,8 +273,8 @@ def render_index(catalog: Catalog) -> str:
     def _links(rows: List[Dict[str, Any]]) -> str:
         return "".join(
             f'<li><a href="/s/{page["slug"]}">{page["title"]}</a>'
-            f' <span class="meta">제도 {len(page["services"])}건</span></li>'
-            for page in sorted(rows, key=lambda page: (-len(page["services"]), page["title"]))
+            f' <span class="meta">제도 {page["count"]}건</span></li>'
+            for page in sorted(rows, key=lambda page: (-page["count"], page["title"]))
         )
 
     business_count = stats.get("business", 0)
@@ -232,7 +282,7 @@ def render_index(catalog: Catalog) -> str:
     body = f"""
 <main>
   <section class="card" style="margin-top:16px">
-    <h2>주제별 지원금</h2>
+    <h1 class="page-title">주제·지역별 지원금 모음</h1>
     <p class="sub">제도 {stats['services']:,}건(개인·가구 {personal_count:,} · 창업·기업 {business_count:,})을
     주제별로 묶었습니다. 각 페이지에서 대상·금액·신청기한·문의처를
     확인하고, <a href="/">내 조건으로 판정</a>하면 받을 가능성과 확인 필요 항목을 나눠 볼 수 있습니다.</p>
@@ -258,6 +308,7 @@ def render_index(catalog: Catalog) -> str:
         ("청년·출산·주거·구직·소상공인·창업·R&D 등 주제별, 시·도별 정부·지자체 지원금과 "
          "창업·기업 지원사업 목록·신청기한·문의처."),
         body,
+        heading="주제·지역별 지원금 모음",
     )
 
 
@@ -266,35 +317,55 @@ def render_item(slug: str, catalog: Catalog) -> Optional[str]:
     if page is None:
         return None
     noindex = not page["indexable"]
-    services = page["services"]
-    local = sum(1 for svc in services if svc.region.get("level") != "national")
-    missing = sum(1 for svc in services if not svc.has_criteria)
+    count = int(page["count"])
+    local = int(page.get("local") or 0)
+    missing = int(page.get("missing") or 0)
+    # 화면에 그릴 앞부분만 읽는다(예전에는 페이지마다 1.2만 건 목록을 통째로 들고 있었다).
+    wanted = list(page["service_ids"])[:MAX_ROWS_PER_PAGE]
+    services = catalog.get_many(wanted) if wanted else []
+    region_hub = _region_hub_link(page)
     body = f"""
 <main>
   <section class="card" style="margin-top:16px">
-    <h2>{page['title']}</h2>
-    <p class="sub">{page['intro']} 제도 {len(services)}건(지자체 {local}건)을 정리했습니다.
+    <h1 class="page-title">{html.escape(page['title'])}</h1>
+    <p class="sub">{html.escape(page['intro'])} 제도 {count}건(지자체 {local}건)을 정리했습니다.
     {f'이 중 {missing}건은 원본 선정기준이 비어 있어 &lsquo;확인 필요&rsquo;로 표시합니다.' if missing else ''}</p>
     <div class="links">
       <a class="pill" href="/">내 조건으로 판정하기</a>
       <a href="/s/">주제 전체 보기</a>
+      {region_hub}
     </div>
     {f'<div class="notice">이 페이지는 제도가 {MIN_INDEX_ITEMS}건 미만이라 검색 노출에서 제외(noindex)됩니다. 내용은 그대로 유효합니다.</div>' if noindex else ''}
-    {f'<div class="notice">목록이 길어 앞 {MAX_ROWS_PER_PAGE}건만 표시합니다(전체 {len(services)}건). 조건을 넣어 판정하면 더 정확합니다.</div>' if len(services) > MAX_ROWS_PER_PAGE else ''}
+    {f'<div class="notice">목록이 길어 앞 {MAX_ROWS_PER_PAGE}건만 표시합니다(전체 {count}건). 조건을 넣어 판정하면 더 정확합니다.</div>' if count > MAX_ROWS_PER_PAGE else ''}
   </section>
   <section class="card">
-    <h3>제도 목록</h3>
+    <h2>제도 목록</h2>
     {_service_rows(services)}
   </section>
 </main>
 """
     return _page(
-        f"{page['title']} 총정리 (2026) | GRNT",
-        f"{page['title']} {len(services)}건의 지원대상·금액·신청기한·문의처 정리. 자격 코드 기반 사전 점검.",
+        f"{page['title']} \u2014 대상·금액·신청기한 총정리 (2026) | GRNT",
+        f"{page['title']} {count}건의 지원대상·금액·신청기한·문의처 정리. 자격 코드 기반 사전 점검.",
         body,
+        heading=page["title"],
         noindex=noindex,
         canonical_path=f"/s/{slug}",
     )
+
+
+def _region_hub_link(page: Dict[str, Any]) -> str:
+    """지역 주제 페이지는 시·도 허브로 넘긴다 — 두 페이지의 검색 의도를 나눈다.
+
+    `/s/seoul` 은 제도 목록(대상·금액·기한), `/regions/seoul` 은 시·군·구별 건수·마감 현황이다.
+    같은 말을 두 번 쓰지 않고 서로를 가리키게 해 키워드 중복을 줄인다.
+    """
+    if page.get("kind") != "region":
+        return ""
+    sido = SLUG_TO_SIDO.get(page["slug"])
+    if not sido:
+        return ""
+    return f'<a href="/regions/{page["slug"]}">{html.escape(sido)} 시·군·구별 현황·마감</a>'
 
 
 def region_name_for_slug(slug: str) -> Optional[str]:

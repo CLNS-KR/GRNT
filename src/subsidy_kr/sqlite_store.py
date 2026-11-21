@@ -13,7 +13,23 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import programs, regions, synonyms
-from .catalog import Catalog, Service, normalize_service, search_text
+from .catalog import BROWSE_CACHE_MAX, Catalog, Service, normalize_service, search_text
+
+# 색인 스키마 버전 — json·지역 택소노미와 따로 본다. 계산해 둔 열(종류·마감일)이 없는
+# 예전 DB 를 그대로 쓰면 경량 조회가 빈 결과를 내므로, 다르면 `load_catalog` 이 다시 만든다.
+INDEX_SCHEMA = 2
+
+# 프로필 없는 둘러보기의 정렬 — `catalog.browse_sort_key` 와 같은 순서(종류·지역·마감).
+# `?` 두 개는 기준일(YYYY-MM-DD)이다(마감 임박도는 오늘 기준이라 저장하지 않고 계산한다).
+_BROWSE_ORDER = (
+    "CASE region_level WHEN 'sigungu' THEN 0 WHEN 'sido' THEN 1 ELSE 2 END, "
+    "CASE WHEN deadline_end <> '' "
+    "     AND julianday(deadline_end) - julianday(?) BETWEEN 0 AND 7 THEN 0 "
+    "     WHEN deadline_end <> '' "
+    "     AND julianday(deadline_end) - julianday(?) BETWEEN 0 AND 30 THEN 1 "
+    "     ELSE 2 END, "
+    "CASE WHEN deadline_end = '' THEN '9999-12-31' ELSE deadline_end END, idx"
+)
 
 
 def build_sqlite_from_rows(
@@ -49,6 +65,8 @@ def build_sqlite_from_rows(
                 source TEXT NOT NULL,
                 name TEXT NOT NULL,
                 search_text TEXT NOT NULL,
+                benefit_kind TEXT NOT NULL,
+                deadline_end TEXT NOT NULL,
                 row_json TEXT NOT NULL
             )
             """
@@ -73,6 +91,10 @@ def build_sqlite_from_rows(
             reg = svc.region or {}
             recruiting = str((svc.business or {}).get("recruiting") or "")
             body = search_text(svc)
+            # 종류·마감일은 프로필과 무관하게 정해지므로 색인할 때 한 번만 계산해 둔다.
+            # 이 두 열이 경량 조회(둘러보기·마감 캘린더)를 SQL 만으로 처리하게 해 준다.
+            benefit_kind = "program" if svc.benefit_kind == "program" else "grant"
+            deadline_end = str((svc.deadline or {}).get("end_date") or "")
             insert_rows.append(
                 (
                     idx,
@@ -90,6 +112,8 @@ def build_sqlite_from_rows(
                     svc.source or "gov24",
                     svc.name or "",
                     body,
+                    benefit_kind,
+                    deadline_end,
                     json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
                 )
             )
@@ -99,8 +123,9 @@ def build_sqlite_from_rows(
             INSERT INTO services (
                 idx, service_id, track, region_level, sido, sigungu,
                 is_expired, is_closed_biz, has_conditions, has_criteria,
-                recruiting, agency, source, name, search_text, row_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                recruiting, agency, source, name, search_text,
+                benefit_kind, deadline_end, row_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             insert_rows,
         )
@@ -108,12 +133,15 @@ def build_sqlite_from_rows(
             "CREATE INDEX idx_services_filter ON services (track, region_level, sido, sigungu, is_expired)"
         )
         conn.execute("CREATE INDEX idx_services_region ON services (region_level, sido, sigungu)")
+        conn.execute("CREATE INDEX idx_services_deadline ON services (deadline_end)")
 
         meta_to_save = dict(meta)
         meta_to_save["_closed_business_count"] = closed_biz_count
         meta_to_save["_expired_count"] = expired_count
         # 지역 택소노미 버전 — 개편으로 sido·sigungu 열이 낡으면 load_catalog 가 다시 만든다.
         meta_to_save["region_schema"] = regions.SCHEMA_VERSION
+        # 색인 스키마 버전 — 이 열(benefit_kind·deadline_end)이 없으면 다시 만든다.
+        meta_to_save["index_schema"] = INDEX_SCHEMA
         for k, v in meta_to_save.items():
             conn.execute(
                 "INSERT INTO meta (key, value_json) VALUES (?, ?)",
@@ -176,6 +204,33 @@ class SQLiteCatalog:
                 "SELECT row_json FROM services WHERE service_id = ?", (sid,)
             ).fetchone()
             return self._row_to_service(row[0]) if row else None
+        finally:
+            conn.close()
+
+    def get_many(self, service_ids: Any) -> List[Service]:
+        """여러 건을 요청 순서대로 — 목록 페이지가 필요한 만큼만 읽는다."""
+        ids = [str(sid or "").strip() for sid in service_ids]
+        ids = [sid for sid in ids if sid]
+        if not ids:
+            return []
+        conn = self._connect()
+        try:
+            marks = ",".join("?" for _ in ids)
+            rows = conn.execute(
+                f"SELECT service_id, row_json FROM services WHERE service_id IN ({marks})",
+                ids,
+            ).fetchall()
+        finally:
+            conn.close()
+        found = {sid: self._row_to_service(row_json) for sid, row_json in rows}
+        return [found[sid] for sid in ids if sid in found]
+
+    def iter_services(self) -> Any:
+        """전체를 한 건씩 스트림 — 1.2만 건을 한 번에 메모리에 올리지 않는다."""
+        conn = self._connect()
+        try:
+            for (row_json,) in conn.execute("SELECT row_json FROM services ORDER BY idx"):
+                yield self._row_to_service(row_json)
         finally:
             conn.close()
 
@@ -295,7 +350,6 @@ class SQLiteCatalog:
         finally:
             conn.close()
 
-        today = date.today()
         out: List[Service] = []
         for (row_json,) in rows:
             svc = self._row_to_service(row_json)
@@ -350,6 +404,131 @@ class SQLiteCatalog:
             hits.append((score, svc))
         hits.sort(key=lambda pair: (-pair[0], pair[1].name))
         return [svc for _score, svc in hits[: max(1, limit)]]
+
+    # --- 경량 조회 (프로필 없는 검색 · 마감 캘린더) --------------------------
+    def _scope_sql(self, *, track: str = "all", business_declared: bool = False,
+                   include_closed: bool = False, sido: Optional[str] = None,
+                   sigungu: Optional[str] = None) -> Tuple[List[str], List[Any]]:
+        """`query_pool` 과 같은 트랙·마감·지역 조건을 SQL 조각으로 만든다."""
+        conds: List[str] = []
+        params: List[Any] = []
+        if track == programs.TRACK_BUSINESS:
+            conds.append("track = ?")
+            params.append(programs.TRACK_BUSINESS)
+        elif track == programs.TRACK_PERSONAL or not business_declared:
+            conds.append("track = ?")
+            params.append(programs.TRACK_PERSONAL)
+        if not include_closed:
+            conds.append("is_expired = 0")
+        province = regions.canonical_sido(sido)
+        district = regions.canonical_sigungu(province, sigungu) if province else None
+        if province:
+            if district:
+                conds.append(
+                    "(region_level = 'national' OR (sido = ? AND (region_level = 'sido' "
+                    "OR (region_level = 'sigungu' AND sigungu = ?))))"
+                )
+                params.extend([province, district])
+            else:
+                conds.append(
+                    "(region_level = 'national' OR (sido = ? AND region_level IN ('sido', 'sigungu')))"
+                )
+                params.append(province)
+        return conds, params
+
+    @staticmethod
+    def _where(conds: List[str]) -> str:
+        return (" WHERE " + " AND ".join(conds)) if conds else ""
+
+    def browse_pool(self, *, sido: Optional[str] = None, sigungu: Optional[str] = None,
+                    track: str = "all", business_declared: bool = False,
+                    include_closed: bool = False, max_scan: int = 20000,
+                    per_kind: int = 20, today: Optional[date] = None) -> Dict[str, Any]:
+        """프로필 없이 둘러보는 검색 — 건수와 종류별 상위 목록만 SQL 로 가져온다.
+
+        조건이 없는 검색은 후보가 전부 같은 판정('확인 필요 — 정보 부족')이다. 그래서
+        1.3만 건을 Service 객체로 읽어 판정하지 않고, 건수는 COUNT 로, 보여 줄 줄은
+        정렬 상위 몇 건만 읽는다(라이브 `GET /s/`·기본 검색의 28초 지연·OOM 원인 제거).
+        """
+        conds, params = self._scope_sql(track=track, business_declared=business_declared,
+                                        include_closed=include_closed, sido=sido,
+                                        sigungu=sigungu)
+        limit = max(0, int(max_scan))
+        per = max(1, int(per_kind))
+        ref = (today or date.today()).isoformat()
+        key = (sido or "", sigungu or "", str(track), bool(business_declared),
+               bool(include_closed), limit, per, ref)
+        cache = self.memo.get("browse_pools")
+        if cache is None:
+            cache = {}
+            self.memo["browse_pools"] = cache
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        by_kind: Dict[str, int] = {"grant": 0, "program": 0}
+        top: Dict[str, List[Service]] = {"grant": [], "program": []}
+        count_sql = (
+            "SELECT benefit_kind, COUNT(*) FROM (SELECT benefit_kind FROM services"
+            + self._where(conds)
+            + " ORDER BY idx LIMIT ?) GROUP BY benefit_kind"
+        )
+        conn = self._connect()
+        try:
+            for kind, count in conn.execute(count_sql, [*params, limit]):
+                by_kind[str(kind)] = int(count)
+            per_kind_conds = conds + ["benefit_kind = ?"]
+            rows_sql = (
+                "SELECT row_json FROM services" + self._where(per_kind_conds)
+                + " ORDER BY " + _BROWSE_ORDER + " LIMIT ?"
+            )
+            for kind in ("grant", "program"):
+                rows = conn.execute(rows_sql, [*params, kind, ref, ref, per]).fetchall()
+                top[kind] = [self._row_to_service(row[0]) for row in rows]
+        finally:
+            conn.close()
+        payload = {"total": sum(by_kind.values()), "by_kind": by_kind, "services": top}
+        while len(cache) >= BROWSE_CACHE_MAX:
+            cache.pop(next(iter(cache)))
+        cache[key] = payload
+        return payload
+
+    def deadline_between(self, *, start: date, until: date, track: str = "all",
+                         business_declared: bool = False, sido: Optional[str] = None,
+                         sigungu: Optional[str] = None,
+                         keyword: Optional[str] = None) -> Dict[str, Any]:
+        """마감일이 `start`~`until` 사이인 제도만 — 마감 캘린더가 필요한 줄만 읽는다."""
+        # 캘린더의 `track="all"` 은 '두 트랙 모두'다(개인 트랙 기본값과 다르다).
+        conds, params = self._scope_sql(track=track, business_declared=True,
+                                        include_closed=True, sido=sido, sigungu=sigungu)
+        word = str(keyword or "").strip()
+        if word:
+            # 파이썬의 `keyword in svc.name` 과 같은 부분 일치(대소문자 구분, %·_ 해석 없음).
+            conds.append("instr(name, ?) > 0")
+            params.append(word)
+        start_iso, until_iso = start.isoformat(), until.isoformat()
+        conn = self._connect()
+        try:
+            counts = conn.execute(
+                "SELECT COUNT(*), "
+                "COALESCE(SUM(deadline_end = ''), 0), "
+                "COALESCE(SUM(deadline_end <> '' AND deadline_end < ?), 0) FROM services"
+                + self._where(conds),
+                [start_iso, *params],
+            ).fetchone()
+            rows = conn.execute(
+                "SELECT row_json FROM services"
+                + self._where(conds + ["deadline_end >= ?", "deadline_end <= ?"])
+                + " ORDER BY deadline_end, idx",
+                [*params, start_iso, until_iso],
+            ).fetchall()
+        finally:
+            conn.close()
+        return {
+            "services": [self._row_to_service(row[0]) for row in rows],
+            "total": int((counts or [0, 0, 0])[0] or 0),
+            "unscheduled": int((counts or [0, 0, 0])[1] or 0),
+            "expired": int((counts or [0, 0, 0])[2] or 0),
+        }
 
     def stats(self) -> Dict[str, Any]:
         if self._stats is not None:

@@ -486,6 +486,11 @@ SIDO_PURPOSE = (
     "신청할 수 있는 전국 공통 제도를 함께 정리합니다."
 )
 
+PAGE_HEAD_CSS = """
+.brand-name{margin:0;font-size:18px;letter-spacing:-.2px;font-weight:700}
+.brand-name a{color:inherit;text-decoration:none}
+h1.page-title{font-size:20px;margin:0 0 6px;letter-spacing:-.3px}
+"""
 REGION_CSS = """
 .region-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
 @media (max-width:680px){.region-grid{grid-template-columns:1fr}}
@@ -579,50 +584,75 @@ def _is_soon(svc: Any) -> bool:
     return isinstance(days, int) and 0 <= days <= SOON_DAYS
 
 
-def region_stats(catalog: Any) -> Dict[str, Dict[str, Any]]:
-    """시도별 집계 — 카탈로그를 한 번만 훑어 모든 광역단체(16곳)를 계산하고 메모에 둔다.
+def _keep_smallest(bucket: List[tuple], key: tuple, svc: Any, limit: int) -> None:
+    """상위 `limit` 개만 남기는 버킷 — 중간중간 줄어들어 큰 카탈로그도 메모리를 잡지 않는다."""
+    bucket.append((key, svc))
+    if len(bucket) > limit * 4:
+        bucket.sort(key=lambda item: item[0])
+        del bucket[limit:]
 
-    `SQLiteCatalog`·`Catalog` 둘 다 `services`·`memo`·`meta` 를 제공하므로 같은 코드로
-    동작합니다. 계산 결과는 작은 요약(건수·분야·상위 목록)이라 프로세스 수명 동안 재사용합니다.
+
+def region_stats(catalog: Any) -> Dict[str, Dict[str, Any]]:
+    """시도별 집계 — 카탈로그를 **한 번만 스트림으로** 훑어 16곳을 계산하고 메모에 둔다.
+
+    예전에는 `catalog.services` 로 1.3만 건 Service 객체를 한꺼번에 만들었다(첫 지역 페이지
+    방문 때 40MB+). 지금은 한 건씩 읽어 집계만 더하고, 목록에 남기는 건 시·도별 상위
+    `MAX_HUB_ITEMS` 건뿐이다. 계산 결과도 작은 요약이라 프로세스 수명 동안 재사용된다.
     """
     cached = catalog.memo.get("region_hub_stats") if hasattr(catalog, "memo") else None
     if cached is not None:
         return cached
-    services = catalog.services
-    national_open: List[Any] = []
-    local_by_sido: Dict[str, List[Any]] = {}
-    for svc in services:
+    buckets: Dict[str, Dict[str, Any]] = {
+        sido: {"local_total": 0, "open": 0, "soon": 0,
+               "fields": Counter(), "sigungu": Counter(), "top": []}
+        for sido in SIDO_SLUGS
+    }
+    national_open = 0
+    national_top: List[tuple] = []
+    stream = catalog.iter_services() if hasattr(catalog, "iter_services") else catalog.services
+    for svc in stream:
         level = svc.region.get("level")
         if level == "national":
             if not svc.is_expired:
-                national_open.append(svc)
+                national_open += 1
+                _keep_smallest(national_top, (svc.is_business, _deadline_rank(svc)),
+                               svc, MAX_HUB_ITEMS)
             continue
         sido = svc.region.get("sido")
-        if sido in SIDO_SLUGS:
-            local_by_sido.setdefault(sido, []).append(svc)
-    national_top = sorted(national_open, key=lambda svc: (svc.is_business, _deadline_rank(svc)))[
-        :MAX_HUB_ITEMS]
+        bucket = buckets.get(sido)
+        if bucket is None:
+            continue
+        bucket["local_total"] += 1
+        if svc.is_expired:
+            continue
+        bucket["open"] += 1
+        bucket["fields"][svc.field_label] += 1
+        if svc.region.get("sigungu"):
+            bucket["sigungu"][svc.region["sigungu"]] += 1
+        if _is_soon(svc):
+            bucket["soon"] += 1
+        _keep_smallest(bucket["top"], (svc.is_business, _deadline_rank(svc)), svc, MAX_HUB_ITEMS)
+    national_items = [svc for _key, svc in sorted(national_top, key=lambda item: item[0])[
+        :MAX_HUB_ITEMS]]
     result: Dict[str, Dict[str, Any]] = {}
     for sido, slug in SIDO_SLUGS.items():
-        local = local_by_sido.get(sido, [])
-        open_rows = [svc for svc in local if not svc.is_expired]
-        fields = Counter(svc.field_label for svc in open_rows)
-        sigungu = Counter(svc.region.get("sigungu") for svc in open_rows
-                          if svc.region.get("sigungu"))
+        bucket = buckets[sido]
+        local_total = int(bucket["local_total"])
+        open_count = int(bucket["open"])
         result[sido] = {
             "sido": sido,
             "slug": slug,
-            "local_total": len(local),
-            "local_open": len(open_rows),
-            "local_closed": len(local) - len(open_rows),
-            "soon": sum(1 for svc in open_rows if _is_soon(svc)),
-            "fields": fields.most_common(6),
-            "sigungu": sigungu.most_common(10),
+            "local_total": local_total,
+            "local_open": open_count,
+            "local_closed": local_total - open_count,
+            "soon": int(bucket["soon"]),
+            "fields": bucket["fields"].most_common(6),
+            "sigungu": bucket["sigungu"].most_common(10),
             "sigungu_total": len(_sigungu_rows(sido)),
-            "items": sorted(open_rows, key=lambda svc: (svc.is_business, _deadline_rank(svc)))[
-                :MAX_HUB_ITEMS],
-            "national_open": len(national_open),
-            "national_items": national_top,
+            "items": [svc for _key, svc in
+                      sorted(bucket["top"], key=lambda item: item[0])[:MAX_HUB_ITEMS]],
+            "national_open": national_open,
+            "national_items": national_items,
         }
     if hasattr(catalog, "memo"):
         catalog.memo["region_hub_stats"] = result
@@ -757,14 +787,14 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 <meta name="twitter:card" content="summary">
 <link rel="canonical" href="{canonical}">
 {scripts}
-<style>{BASE_CSS}{REGION_CSS}</style>
+<style>{BASE_CSS}{PAGE_HEAD_CSS}{REGION_CSS}</style>
 </head>
 <body>
 <div class="wrap">
 <header class="top">
   <div class="brand">
     <div class="mark" aria-hidden="true">G</div>
-    <div><h1>GRNT · 시·도별 지원금</h1>
+    <div><p class="brand-name"><a href="/">GRNT · 시·도별 지원금</a></p>
     <p class="en">KOREA GRANT &amp; SUBSIDY INTELLIGENCE</p></div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -856,7 +886,7 @@ def render_index(catalog: Any) -> str:
 <main>
   <p class="crumb"><a href="/">GRNT</a> · <span>지역별 지원금</span></p>
   <section class="card" style="margin-top:12px">
-    <h2>전국 {len(SIDO_SLUGS)}개 시·도 지원금 모아보기</h2>
+    <h1 class="page-title">시·도별 지원금 현황</h1>
     <p class="sub">사는 지역을 고르면 그 시·도 소관 공고와 전국 공통 제도를 한 화면에서 볼 수
     있습니다. 건수·분야·마감일은 아래 카탈로그 집계를 그대로 씁니다.</p>
     <div class="stat-grid">
@@ -911,7 +941,7 @@ def render_item(slug: str, catalog: Any) -> Optional[str]:
     purpose = SIDO_PURPOSE.format(sido=sido)
     fields = stats["fields"]
     top_field = fields[0][0] if fields else ""
-    title = f"{sido} 지원금·보조금 총정리 ({_year(catalog)}) | GRNT"
+    title = f"{sido} 지자체 지원금 현황 — 시·군·구별 공고·마감 ({_year(catalog)}) | GRNT"
     description = (f"{sido}에서 신청할 수 있는 지자체 지원금 {stats['local_total']:,}건과 전국 공통 "
                    f"지원금을 분야·마감일 기준으로 정리했습니다. 시·군·구별 공고 수와 마감 임박 "
                    f"공고 {stats['soon']:,}건을 함께 봅니다.")
@@ -959,7 +989,7 @@ def render_item(slug: str, catalog: Any) -> Optional[str]:
   <p class="crumb"><a href="/">GRNT</a> · <a href="/regions/">지역별 지원금</a> ·
   <span>{_esc(sido)}</span></p>
   <section class="card" style="margin-top:12px">
-    <h2>{_esc(sido)} 지원금·보조금</h2>
+    <h1 class="page-title">{_esc(sido)} 지자체 지원금 현황</h1>
     <p class="sub">{_esc(structure)} {purpose}</p>
     <div class="stat-grid">
       <div class="stat"><span>지자체 공고</span><b>{stats['local_total']:,}</b></div>
@@ -997,7 +1027,7 @@ def render_item(slug: str, catalog: Any) -> Optional[str]:
     <h3>{_esc(sido)} 시·군·구별 공고</h3>
     <p class="sub">소관기관명으로 시·군·구까지 판별된 공고를 센 값입니다(시·도 단위 공고는 제외).</p>
     {sigungu_block}
-    <div class="links"><a href="/s/{_esc(stats['slug'])}">{_esc(sido)} 주제별 모아보기</a>
+    <div class="links"><a href="/s/{_esc(stats['slug'])}">{_esc(sido)} 지원금 목록 전체 보기</a>
     <a href="/guides/">자주 묻는 지원금 질문</a></div>
   </section>
   <section class="card">

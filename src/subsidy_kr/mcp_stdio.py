@@ -79,7 +79,7 @@ def main(argv: Optional[list] = None) -> int:
     db_path = (args.db or os.environ.get("SUBSIDY_KR_DB") or "").strip() or ":memory:"
     store = Store(db_path)
     _log(f"GRNT stdio MCP ready (v{__version__}, tools={len(mcp_tools())}, "
-         f"catalog={catalog.meta.get('catalog_state')}, services={len(catalog.services)})")
+         f"catalog={catalog.meta.get('catalog_state')}, services={len(catalog)})")
     try:
         return serve(sys.stdin, sys.stdout, catalog=catalog, store=store)
     finally:

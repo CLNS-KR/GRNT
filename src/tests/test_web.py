@@ -273,7 +273,7 @@ class PseoTest(unittest.TestCase):
 
     def test_index_lists_topics(self):
         html = pseo.render_index(self.catalog)
-        self.assertIn("주제별 지원금", html)
+        self.assertIn("주제·지역별 지원금", html)
         self.assertIn('href="/s/cheongnyeon"', html)
         self.assertIn('href="/s/incheon"', html)
 
@@ -299,7 +299,19 @@ class PseoTest(unittest.TestCase):
     def test_min_items_rule(self):
         self.assertGreaterEqual(pseo.MIN_INDEX_ITEMS, 5)
         for page in pseo.items(self.catalog):
-            self.assertEqual(page["indexable"], len(page["services"]) >= pseo.MIN_INDEX_ITEMS)
+            self.assertEqual(page["count"], len(page["service_ids"]))
+            self.assertEqual(page["indexable"], page["count"] >= pseo.MIN_INDEX_ITEMS)
+
+    def test_item_h1_is_the_page_subject(self):
+        """pSEO 페이지의 h1 은 브랜드가 아니라 그 페이지의 주제여야 한다(색인 제목)."""
+        html = pseo.render_item("cheongnyeon", self.catalog)
+        self.assertEqual(html.count("<h1"), 1)
+        self.assertIn('<h1 class="page-title">청년 지원금</h1>', html)
+        self.assertNotIn("<h1>GRNT", html)
+        region_html = pseo.render_item("seoul", self.catalog)
+        if region_html is not None:
+            self.assertIn('<h1 class="page-title">서울특별시 지원금 목록</h1>', region_html)
+            self.assertNotIn("<h1>GRNT", region_html)
 
     def test_slugs_are_url_safe(self):
         for slug in pseo.slugs(self.catalog):

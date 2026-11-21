@@ -473,7 +473,7 @@ def _program_index(catalog: Catalog, *, include_closed: bool = False) -> List[Di
         pool = catalog.query_pool(track=programs.TRACK_BUSINESS, business_declared=True,
                                   include_closed=include_closed, max_scan=MAX_SCAN)
     else:
-        pool = [svc for svc in catalog.services if svc.is_business]
+        pool = catalog.by_track(programs.TRACK_BUSINESS)
     cards: List[Dict[str, Any]] = []
     for svc in pool:
         if svc.is_expired and not include_closed:
