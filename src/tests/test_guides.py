@@ -172,8 +172,9 @@ class SosangonginBatchGuidesTest(unittest.TestCase):
     def slugs(self):
         return list(self.BATCH)
 
-    def test_total_is_sixty_one(self):
-        self.assertEqual(guides.GUIDE_COUNT, 61)
+    def test_total_is_at_least_sixty_one(self):
+        '''2026-11 20종 추가 후 81개 — 이 배치(10종)는 그대로 남아 있어야 한다.'''
+        self.assertGreaterEqual(guides.GUIDE_COUNT, 61)
 
     def test_ten_new_guides_exist_and_are_complete(self):
         self.assertEqual(len(set(self.slugs())), 10)

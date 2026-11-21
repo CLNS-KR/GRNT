@@ -17,7 +17,7 @@
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
 - 시·도 허브: `GET /regions/` · `GET /regions/{slug}` — 16개 시·도별 공고 수·분야 분포·마감 임박 목록·시·군·구별 공고 수(FAQPage·BreadcrumbList·WebPage JSON-LD)
-- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 61개(FAQPage JSON-LD)
+- 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 81개(FAQPage JSON-LD)
 - 검색 동의어: `keyword` 검색은 **생활어 사전**(`synonyms.py`)으로 단어를 넓혀 봅니다 — "전기세"→전기요금·가스요금, "병원비"→의료비·진료비, "배달비"→택배비·배달앱. 질의어를 그대로 담은 제도가 항상 먼저 나옵니다
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
@@ -255,9 +255,14 @@ CSV로 정리합니다. `POST /v1/batch-match`, `batch_match_clients` 툴, 웹 U
 
 사람들은 ChatGPT·Perplexity·네이버에 "청년 월세 지원 조건"처럼 **질문**으로 묻습니다. 그때
 인용되려면 질문 하나에 답 하나가 있는 페이지와, 기계가 읽을 구조화 데이터가 함께 있어야 합니다.
-`/guides/` 아래 61개 페이지가 그 역할을 합니다(기본 36개 + 2026-11 생활·육아·연말정산·소상공인 롱테일 15개
+`/guides/` 아래 81개 페이지가 그 역할을 합니다(기본 36개 + 2026-11 생활·육아·연말정산·소상공인 롱테일 15개
 + 2026-11 소상공인·예비창업자·가계 10개 — 고용촉진장려금, 아이돌봄, 신혼부부 전세자금 이자지원,
-1인 자영업자 고용보험료, 학자금대출, 채무조정, 장기요양보험, 긴급복지, 예비창업 자금 조달, 배달·택배비).
+1인 자영업자 고용보험료, 학자금대출, 채무조정, 장기요양보험, 긴급복지, 예비창업 자금 조달, 배달·택배비
++ 2026-11 20개 — 전세보증금 반환보증, 청년 전세임대주택, 임산부 교통비, 배우자 출산휴가 급여,
+양육수당과 보육료, 청년도전지원사업, 육아기 근로시간 단축 급여, 국민연금 추납·임의계속가입,
+근로장려금 기한 후 신청, 청년도약계좌 중도해지, 통신비 감면, 건강보험 피부양자, 초기창업패키지,
+사업주 장애인 고용지원, 폐업 시 근로자 정리, 카드·결제 수수료 지원, 지원금 환수·정산,
+중소기업 정책자금 심사, 마감 임박 공고 확인, 공고문 읽는 순서).
 
 | 구성 | 내용 |
 |---|---|
@@ -386,6 +391,26 @@ sqlite3 data/app.sqlite "select id, day, topic, contact, message from inquiries 
 
 ---
 
+## 3-10. 질문형 가이드 20종 추가·공개 문안 익명성 정리 (0.4.5)
+
+가이드를 **61개 → 81개**로 늘렸습니다. 새 20개는 소상공인·청년·임신/출산·중소기업·창업자가
+실제로 검색하는 질문이고, 기존 61개와 질문이 겹치지 않습니다.
+
+| 분야 | 새 질문 |
+|---|---|
+| 주거 | 전세보증금 반환보증의 가입 주체·보증료, 청년 전세임대주택의 대기·후보 주택 요건 |
+| 출산·가족 | 임산부 교통비(지자체 바우처) 신청·사용처, 배우자 출산휴가 급여 지급 주체, 양육수당과 보육료의 대체 관계 |
+| 일자리 | 청년도전지원사업과 구직급여 중복 여부, 육아기 근로시간 단축 급여 요건 |
+| 소득·생활비 | 국민연금 추납·임의계속가입, 근로장려금 기한 후 신청, 청년도약계좌 중도해지, 통신비 감면, 건강보험 피부양자 |
+| 창업·소상공인 | 초기창업패키지 업력 기준, 사업주 장애인 고용지원, 폐업 시 4대보험·퇴직금 정리, 카드·결제 수수료 지원, 지원금 환수·정산, 중소기업 정책자금 심사 |
+| 활용법 | 마감 임박 공고 확인(`deadline_calendar`), 공고문 읽는 순서 |
+
+- 새 가이드도 **금액·수치를 고정하지 않습니다**(`test_guides_expansion_81.test_new_guides_do_not_fix_amounts`).
+- `FAQPage`(질문 4개)·`BreadcrumbList` JSON-LD, `/sitemap.xml`, `/llms.txt`, 홈 푸터, `/v1/meta` 의 `guides.count`
+  가 모두 자동으로 81개를 반영합니다.
+- 공개 저장소 문안에서 외부 협업자 표기를 **중립 표현("외부 코드 검수 제보")** 으로 바꿨습니다
+  (`README.md` 3-8절, `src/tests/test_lightweight_queries.py` 주석).
+
 ## 3-9. 무료 베타 유입 태그·생태계 링크 (0.4.4)
 
 `POST /v1/inquiry` 에 **선택** 필드 `cohort`(별칭 `source`)를 더했습니다. 무료 베타 테스터나
@@ -413,7 +438,7 @@ curl -s -X POST https://grnt-kr.onrender.com/v1/inquiry \
 
 ## 3-8. 메모리·속도·색인 정리 (0.4.3)
 
-`Pilotage(@pilot)` 님 측 코드·라이브 검수 리포트의 긴급/높음/운영 개선점을 재검증해 고친 버전입니다.
+외부 코드 검수 제보로 들어온 긴급/높음/운영 개선점을 재검증해 고친 버전입니다.
 Render 무료(0.1 vCPU·512MB)에서 **OOM 과 28초 지연**을 만들던 지점이 모두 사라졌습니다.
 
 | 항목 | 0.4.2 | 0.4.3 |
@@ -541,7 +566,7 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
     │   ├── pseo.py            /s/ 주제·지역 페이지(thin content 규칙)
     │   ├── regions.py         시도·시군구 정규화(소관기관명→지역) + /regions/ 시·도별 허브
     │   ├── local_portals.py   지자체 자체 복지포털 수집(부평·인천·서울WIS·경기·세종 등)
-    │   ├── guides.py          /guides/ 질문형 가이드 61개(FAQPage·실시간 공고 연결)
+    │   ├── guides.py          /guides/ 질문형 가이드 81개(FAQPage·실시간 공고 연결)
 │   ├── synonyms.py        검색어 동의어 사전(생활어 ↔ 공고 용어, 가중치·직접 일치 우선)
     │   ├── static_files.py    robots·llms·sitemap·server-card
     │   ├── site_verification.py 검색엔진 소유확인 메타태그·확인 파일(환경변수)
@@ -659,7 +684,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.4` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.5` 태그로 게시합니다.
 
 ## 9. 라이선스
 
