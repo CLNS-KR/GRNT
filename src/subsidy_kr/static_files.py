@@ -181,7 +181,26 @@ def sitemap_xml(catalog: Catalog, base: Optional[str] = None) -> str:
     <changefreq>monthly</changefreq>
     <priority>{priority}</priority>
   </url>""")
-    body = "\n".join(entries)
+    body = "\n".join(entries + [
+        f"""  <url>
+    <loc>{root}/about</loc>
+    <lastmod>{lastmod}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>""",
+        f"""  <url>
+    <loc>{root}/privacy</loc>
+    <lastmod>{lastmod}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>""",
+        f"""  <url>
+    <loc>{root}/terms</loc>
+    <lastmod>{lastmod}</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>""",
+    ])
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 {body}
@@ -221,3 +240,77 @@ def server_card() -> Dict[str, Any]:
             "창업진흥원 K-Startup(15125364) · 중소벤처기업부 기업마당(15157820, 출처표시·변경금지)"
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# 공유 미리보기 이미지 (og:image) — `/static/og.png`
+# ---------------------------------------------------------------------------
+OG_FILENAME = "og.png"
+OG_WIDTH = 1200
+OG_HEIGHT = 630
+_OG_CACHE: Dict[str, bytes] = {}
+
+
+def project_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def og_image_path(env: Optional[Dict[str, str]] = None) -> str:
+    """브랜드 PNG 경로 — `GRNT_OG_IMAGE` → `<프로젝트>/static/og.png` 순."""
+    env = os.environ if env is None else env
+    override = str(env.get("GRNT_OG_IMAGE") or "").strip()
+    return override or os.path.join(project_root(), "static", OG_FILENAME)
+
+
+def _fallback_png() -> bytes:
+    """이미지 파일이 없을 때 쓰는 표준 라이브러리(zlib·struct) 생성 PNG.
+
+    디자인 도구 없이도 1200×630 브랜드 카드가 나가야 한다는 요구 때문에, 세로 그라데이션과
+    브랜드 블록만 그린 PNG 를 만듭니다(글자 없음 — 폰트 파일에 의존하지 않게).
+    1픽셀 = 3바이트 필터 0 행을 zlib 로 압축하고, IHDR·IDAT·IEND 청크를 struct 로 씁니다.
+    """
+    import struct
+    import zlib
+
+    top = (11, 16, 28)
+    bottom = (18, 28, 52)
+    rows = []
+    for y in range(OG_HEIGHT):
+        ratio = y / (OG_HEIGHT - 1)
+        color = bytes(int(top[i] + (bottom[i] - top[i]) * ratio) for i in range(3))
+        rows.append(b"\x00" + color * OG_WIDTH)
+    raw = bytearray()
+    for y in range(OG_HEIGHT):
+        row = bytearray(rows[y])
+        if 74 <= y < 140:
+            row[1 + 88 * 3:1 + 154 * 3] = b"\x1c\x5b\xd8" * 66
+        if 236 <= y < 238 or 552 <= y < 554:
+            row[1 + 88 * 3:1 + (OG_WIDTH - 88) * 3] = b"\x2a\x3a\x5f" * (OG_WIDTH - 176)
+        raw += row
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    header = struct.pack(">IIBBBBB", OG_WIDTH, OG_HEIGHT, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+
+
+def load_og_image(env: Optional[Dict[str, str]] = None) -> bytes:
+    """`og:image` 로 내려줄 PNG 바이트. 파일이 있으면 그대로, 없으면 생성본."""
+    path = og_image_path(env)
+    cached = _OG_CACHE.get(path)
+    if cached:
+        return cached
+    try:
+        with open(path, "rb") as handle:
+            body = handle.read()
+        if body.startswith(b"\x89PNG\r\n\x1a\n"):
+            _OG_CACHE[path] = body
+            return body
+    except OSError:
+        pass
+    body = _fallback_png()
+    _OG_CACHE[path] = body
+    return body

@@ -45,8 +45,8 @@ import sys
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import programs, sync_gov24
-from .catalog import read_catalog_payload
+from . import programs, snapshots, sync_gov24
+from .catalog import normalize_service, read_catalog_payload
 from .sqlite_store import build_sqlite_from_rows
 
 CATALOG_FILE = "catalog.json"
@@ -247,6 +247,31 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
         gzip_written = write_gzip(root, payload)
         log(f"압축본: {'갱신' if gzip_written else '변경 없음'} ({paths['gzip']})")
 
+    # 일자별 스냅샷 — 재수집이 성공했든(부분 실패 포함) 기존 카탈로그로 끝났든, 그날의
+    # 카탈로그 상태를 한 장 남긴다. `compare_ledgers` 는 이 파일이 있어야 동작하고,
+    # `snapshots/` 는 저장소·이미지에 함께 넣어 두므로(압축본) 배포 환경도 기준일을 갖는다.
+    snapshot_written: Optional[str] = None
+    if not dry_run:
+        try:
+            # sync_gov24 와 같은 규칙으로 정규화한다 — 서비스ID 중복은 마지막 행,
+            # source 는 행이 스스로 밝힌 값(없으면 gov24). 그래야 전날 스냅샷과
+            # 같은 제도를 같은 ID 로 비교한다(0.4.6 에서 기준일 스냅샷을 적재하며 확인).
+            by_id: Dict[str, Any] = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                service_id = str(row.get("서비스ID") or "").strip()
+                if service_id:
+                    by_id[service_id] = row
+            services = [normalize_service(row, source=str(row.get("source") or "gov24"))
+                        for row in by_id.values()]
+            snapshot_written = snapshots.write_snapshot(
+                services, today, snapshots.snapshot_dir(root), compress=True,
+                note_ko="카탈로그 갱신 시 적재한 일자별 스냅샷입니다.")
+            log(f"스냅샷: {snapshot_written}")
+        except (OSError, ValueError, TypeError) as exc:
+            warnings.append(f"스냅샷 적재 실패({type(exc).__name__})")
+
     after_json_sha = _file_sha(paths["json"])
     expired_delta = (after_counts.get("expired", 0) - before_counts.get("expired", 0)
                      if before_counts.get("expired") is not None
@@ -267,7 +292,11 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
         "total_delta": total_delta,
     }
     result["files"] = ([paths["index"]] if index_written else []) + \
-                      ([paths["gzip"]] if gzip_written else [])
+                      ([paths["gzip"]] if gzip_written else []) + \
+                      ([snapshot_written] if snapshot_written else [])
+    result["snapshot"] = {"path": snapshot_written, "day": today,
+                          "available_days": len(snapshots.list_snapshots(
+                              snapshots.snapshot_dir(root)))}
     return result
 
 
@@ -293,6 +322,9 @@ def _human_report(report: Dict[str, Any]) -> str:
     ]
     for warning in report.get("warnings") or []:
         lines.append(f"  경고: {warning}")
+    snapshot = report.get("snapshot") or {}
+    if snapshot.get("path"):
+        lines.append(f"  스냅샷: {snapshot.get('path')} (보관 {snapshot.get('available_days', 0)}일)")
     return "\n".join(lines)
 
 

@@ -44,7 +44,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Deque, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
-from . import (batch_client, guides, mcp_http, pseo, regions, site_verification,
+from . import (batch_client, guides, legal, mcp_http, pseo, regions, site_verification,
                static_files, usage)
 from .api import batch_export, call_tool, mcp_manifest, report_export, submit_inquiry
 from .catalog import Catalog, data_dir_from_env, load_catalog
@@ -351,6 +351,10 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
             elif path in ("/v1/stats", "/v1/meta", "/v1/mcp",
                           "/.well-known/mcp/server-card.json"):
                 self._head(200, "application/json; charset=utf-8")
+            elif legal.is_page(path):
+                self._head(200, "text/html; charset=utf-8")
+            elif path == "/static/og.png":
+                self._head(200, "image/png")
             elif path in ("/robots.txt", "/llms.txt"):
                 self._head(200, "text/plain; charset=utf-8")
             elif path == BATCH_SAMPLE_PATH:
@@ -381,7 +385,8 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
 
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
-            usage.record_request(store, "GET", path)
+            usage.record_request(store, "GET", path,
+                                 client=usage.client_class(self.headers.get("User-Agent")))
             if not self._enter(path, heavy=path in REPORT_EXPORT_PATHS):
                 return
             try:
@@ -426,6 +431,13 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
                         self._send_html(200, page, cache="public, max-age=600")
                 elif path == "/favicon.ico":
                     self._send_empty(204)
+                elif path == "/static/og.png":
+                    # 공유 미리보기 — 이미지 파일이 없으면 표준 라이브러리로 만든 PNG 를 준다.
+                    self._send_bytes(200, static_files.load_og_image(), "image/png",
+                                     "public, max-age=86400", compressible=False)
+                elif legal.is_page(path):
+                    # /privacy · /terms · /about — 서버 렌더 정적 HTML(JS·외부 CDN 없음).
+                    self._send_html(200, legal.render(path) or "", cache="public, max-age=3600")
                 elif path == "/healthz":
                     stats = catalog.stats()
                     self._send_json(200, {
@@ -496,7 +508,8 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
 
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
-            usage.record_request(store, "POST", path)
+            usage.record_request(store, "POST", path,
+                                 client=usage.client_class(self.headers.get("User-Agent")))
             if not self._enter(path, heavy=True):
                 return
             try:
@@ -750,18 +763,46 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None,
 
 
 def _warm_catalog(catalog: Catalog) -> None:
-    """첫 방문자가 브랜드·지역 페이지를 처음 만드는 비용을 대신 치르게 한다(백그라운드).
+    """기동 직후 백그라운드에서 기준일 스냅샷을 적재하고, 첫 방문자의 계산 비용을 대신 치른다.
+
+    기준일 스냅샷을 **기다리지 않고** 포트를 먼저 연다 — 1.3만 건 카탈로그를 훑는 작업이
+    플랫폼 헬스체크를 늦추면 배포가 실패로 보이기 때문입니다.
 
     `/s/` 는 1.3만 건을 한 번 훑어 페이지 목록을 만들고(스트림, 약 1.5초), `/regions/` 는
     시·도별 집계를 만든다. 둘 다 요청과 무관한 캐시라 서버가 뜬 뒤 미리 계산해 두면
     첫 크롤러·첫 방문자가 수 초를 기다리지 않는다. 헬스체크는 이 작업을 기다리지 않는다.
     """
+    _ensure_snapshot_baseline(catalog)
     try:
         catalog.stats()
         pseo.items(catalog)
         regions.hub_summary(catalog)
     except Exception:  # noqa: BLE001 - 미리 계산은 실패해도 서비스에 지장이 없어야 한다
         pass
+
+
+def _ensure_snapshot_baseline(catalog: Catalog) -> Optional[str]:
+    """기동 시 오늘 스냅샷이 없으면 지금 카탈로그로 1장 적재한다.
+
+    `compare_ledgers` 는 스냅샷 파일이 있어야 답할 수 있는데, 무료 플랜은 결국 디스크가
+    비워진다. 이미지에 넣어 둔 기준일 스냅샷(`data/gov24/snapshots/*.json.gz`)에 더해
+    기동 시 오늘을 한 장 남겨, 배포 직후에도 '기준일 있음 · 전일 대비는 다음 갱신부터'로
+    답할 수 있게 한다. 실패해도 기동을 막지 않는다.
+    """
+    if os.environ.get("GRNT_SNAPSHOT_BASELINE", "1").strip().lower() in ("0", "false", "no"):
+        return None
+    from . import snapshots
+
+    try:
+        services = catalog.iter_services() if hasattr(catalog, "iter_services") \
+            else catalog.services
+        path = snapshots.ensure_baseline(services, snapshots.snapshot_dir())
+    except Exception as exc:  # noqa: BLE001 - 기준일 적재 실패가 기동을 막지 않게
+        print(f"경고: 기준일 스냅샷 적재 실패({exc})", file=sys.stderr, flush=True)
+        return None
+    if path:
+        print(f"기준일 스냅샷 적재: {path}", flush=True)
+    return path
 
 
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, db_path: str = "",

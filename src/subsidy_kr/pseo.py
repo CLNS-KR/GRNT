@@ -202,6 +202,11 @@ def _page(title: str, description: str, body: str, *, heading: str, noindex: boo
 {site_verification.meta_tags()}<meta property="og:title" content="{esc(title)}">
 <meta property="og:description" content="{esc(description)}">
 <meta property="og:locale" content="ko_KR">
+<meta property="og:url" content="{canonical}">
+<meta property="og:image" content="{static_files.base_url()}/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="{canonical}">
 <style>{BASE_CSS}{PAGE_CSS}</style>
 </head>

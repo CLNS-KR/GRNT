@@ -18,6 +18,10 @@
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
 - 시·도 허브: `GET /regions/` · `GET /regions/{slug}` — 16개 시·도별 공고 수·분야 분포·마감 임박 목록·시·군·구별 공고 수(FAQPage·BreadcrumbList·WebPage JSON-LD)
 - 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 81개(FAQPage JSON-LD)
+- 고지 페이지: `GET /privacy` · `GET /terms` · `GET /about` — 개인정보 처리방침(문의 연락처 180일 보관·삭제 요청 경로)·이용약관(확정 판정 아님·책임 한계)·서비스 소개(데이터 출처·3종 생태계)를 서버 렌더 정적 HTML로 제공. 홈·주제·지역·가이드 푸터와 `sitemap.xml` 에서 이어집니다
+- 공유 카드: `/static/og.png`(1200×630) + 홈·가이드·고지 페이지의 `canonical`·`og:image` 메타
+- 일자별 스냅샷(0.4.6): 카탈로그 갱신 때 `snapshots/{날짜}.json.gz` 한 장을 적재하고, 배포 이미지에 기준일 스냅샷을 함께 넣어 `compare_ledgers` 가 프로덕션에서 `snapshot_missing` 으로 비지 않게 했습니다(기준일 1장뿐이면 `state: baseline_only` 로 정직하게 답합니다)
+- 사용 통계 구분(0.4.6): `/v1/stats` 의 `traffic.by_channel`(사람이 여는 페이지·크롤러 파일·REST API·MCP·정적 자산·없는 주소)과 `traffic.by_client`(브라우저·봇·기타) — UA 원문·IP·쿠키는 저장하지 않습니다
 - 검색 동의어: `keyword` 검색은 **생활어 사전**(`synonyms.py`)으로 단어를 넓혀 봅니다 — "전기세"→전기요금·가스요금, "병원비"→의료비·진료비, "배달비"→택배비·배달앱. 질의어를 그대로 담은 제도가 항상 먼저 나옵니다
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
@@ -684,7 +688,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.5` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.6` 태그로 게시합니다.
 
 ## 9. 라이선스
 

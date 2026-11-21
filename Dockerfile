@@ -4,7 +4,7 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="GRNT" \
       org.opencontainers.image.description="Korean personal + startup/SME grant eligibility checker (web UI + JSON API + MCP)" \
-      org.opencontainers.image.version="0.4.5"
+      org.opencontainers.image.version="0.4.6"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,6 +19,9 @@ RUN adduser --disabled-password --gecos "" --uid 10001 app \
     && mkdir -p /app/data/gov24
 
 COPY --chown=app:app src/ /app/src/
+# 공유 미리보기(og:image) — static/og.png(1200×630). 파일이 없어도 서버는 표준 라이브러리로
+# 만든 대체 PNG 를 내려보내지만, 이미지에 넣어 두면 브랜드 카드가 그대로 나간다.
+COPY --chown=app:app static/ /app/static/
 # data/ 를 통째로 넣는다 — 저장소에 커밋된 data/gov24/catalog.json.gz(약 3.8MB) 가
 # 함께 들어가서 이미지가 샘플이 아니라 12,429건 실데이터로 뜬다. 원본 catalog.json 이
 # 있으면 로더가 그쪽을 먼저 읽는다. (캐시·DB는 .dockerignore 가 제외)

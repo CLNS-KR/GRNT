@@ -828,7 +828,13 @@ PAGE_TEMPLATE = """<!doctype html>
 <meta property="og:title" content="GRNT — 개인·창업 통합 지원금 판정기">
 <meta property="og:description" content="Grants, simplified. 개인 복지 지원금과 창업·소상공인·기업 지원사업을 한 화면에서 조건별로 판정합니다. 로그인 없이 30초.">
 <meta property="og:locale" content="ko_KR">
-<meta name="twitter:card" content="summary">
+<meta property="og:url" content="{share_origin}/">
+<meta property="og:image" content="{share_origin}/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="GRNT — 내가 받을 수 있는 지원금, 30초 확인">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="{share_origin}/">
 <meta name="robots" content="index,follow">
 {verification}<script type="application/ld+json">
 {{"@context":"https://schema.org","@type":"WebApplication","name":"{service_name}",
@@ -1178,6 +1184,9 @@ PAGE_TEMPLATE = """<!doctype html>
       재산·거주기간 등 코드로 표현되지 않은 요건과 지자체 원본 공백, 공고문의 서술형 요건은
       &lsquo;확인 필요&rsquo;로 표시합니다. 창업·기업 사업의 &lsquo;받을 가능성 높음&rsquo;은 신청자격
       충족을 뜻하고, 선정은 평가·경쟁으로 결정됩니다. 최종 판단은 소관기관 심사입니다.
+      <br>
+      <strong>고지</strong> — <a href="/privacy">개인정보 처리방침</a> ·
+      <a href="/terms">이용약관</a> · <a href="/about">서비스 소개</a> · v{version}
     </p>
   </main>
 </div>

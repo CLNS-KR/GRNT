@@ -2117,7 +2117,10 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 <meta property="og:description" content="{_esc(description)}">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:url" content="{canonical}">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="{root}/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="{canonical}">
 {scripts}
 <style>{BASE_CSS}{PAGE_HEAD_CSS}{GUIDE_CSS}</style>

@@ -9,4 +9,6 @@ src/tests
 data/app.sqlite*
 data/gov24/cache
 # data/gov24/catalog.json.gz 는 이미지에 꼭 들어가야 한다(3.8MB — 이 줄을 추가해 제외하지 말 것).
-# 원본 catalog.json·snapshots/ 는 저장소에 없으므로 이미지에도 들어가지 않는다.
+# data/gov24/snapshots/*.json.gz(기준일 스냅샷, 2MB)도 함께 넣는다 — 이 파일이 있어야
+# compare_ledgers 가 프로덕션에서 '기준일 없음(snapshot_missing)' 으로 비지 않는다.
+# 원본 catalog.json 과 무압축 스냅샷(*.json)은 저장소에 없으므로 이미지에도 들어가지 않는다.

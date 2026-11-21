@@ -466,6 +466,11 @@ def tool_compare_ledgers(args: Dict[str, Any], catalog: Catalog,
             "error": diff.get("error"),
             "scope_limits_ko": SCOPE_LIMITS_KO,
         }, catalog)
+    if diff.get("state") == "baseline_only":
+        # 기준일 1장만 있는 상태 — 오류가 아니라 "아직 비교할 전일이 없다"로 답한다.
+        diff["summary_ko"] = diff.get("message_ko")
+        diff["scope_limits_ko"] = SCOPE_LIMITS_KO
+        return _envelope("compare_ledgers", diff, catalog)
     diff["summary_ko"] = (
         f"{diff['from_day']} → {diff['to_day']} 사이에 제도 {diff['counts']['added']}건 추가, "
         f"{diff['counts']['removed']}건 삭제, {diff['counts']['changed']}건 조건 변경."
@@ -547,8 +552,9 @@ def tool_get_service_meta(args: Dict[str, Any], catalog: Catalog, store: Any = N
             "available_days": len(snapshots.list_snapshots(snapshots.snapshot_dir(data_dir_hint()))),
             "latest_day": latest,
             "note_ko": (
-                "`python -m subsidy_kr.sync_gov24 --sources all` 을 실행할 때마다 "
-                "`snapshots/{날짜}.json` 이 쌓이고, `compare_ledgers` 로 날짜 간 변화를 비교합니다."
+                "카탈로그를 갱신할 때마다 `snapshots/{날짜}.json.gz` 한 장이 쌓이고, "
+                "`compare_ledgers` 로 날짜 간 변화를 비교합니다. 기준일이 1장뿐이면 "
+                "`state: baseline_only` 로 답하고, 전일 대비 비교는 다음 적재부터 제공합니다."
             ),
         },
         "privacy": {

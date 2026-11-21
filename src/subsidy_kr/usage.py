@@ -42,6 +42,24 @@ KIND_TOOL = "tool"
 KIND_VERDICT = "verdict"
 KIND_FLAG = "flag"
 KIND_ZERO_QUERY = "zero_query"
+KIND_CLIENT = "client"      # 요청이 브라우저/봇/기타 중 무엇이었는지(3종, 원문 UA 미저장)
+
+# 트래픽 구분 — 경로를 사람이 읽는 묶음으로만 나눈다(개별 주소는 paths 에 그대로).
+CLIENT_CLASSES = ("browser", "bot", "other")
+CHANNELS = ("web", "crawler_files", "api", "mcp", "assets", "not_found")
+CHANNEL_LABELS_KO = {
+    "web": "사람이 여는 페이지",
+    "crawler_files": "검색·AI 크롤러용 파일(robots·llms·sitemap·서버카드)",
+    "api": "REST API(/v1/…)",
+    "mcp": "MCP(/mcp·/v1/mcp)",
+    "assets": "정적 자산(/static·favicon)",
+    "not_found": "없는 주소(/404)",
+}
+# User-Agent 원문은 저장하지 않는다. 종류를 가르는 데만, 요청 순간에만 본다.
+_BOT_MARKERS = ("bot", "crawler", "spider", "curl", "wget", "python-requests", "python-urllib",
+                "httpx", "go-http-client", "node-fetch", "java/", "okhttp", "libwww", "axios",
+                "gptbot", "claudebot", "perplexity", "anthropic", "openai", "yeti", "glama",
+                "mcporter", "scan")
 
 FLAG_ZERO = "zero_results"
 FLAG_ERROR = "errors"
@@ -54,6 +72,7 @@ FIXED_PATHS = (
     "/v1/tools", "/v1/report/export.csv", "/v1/report/print.html",
     "/v1/batch-match", "/v1/batch-match/export.csv", "/v1/batch-match/reports.html",
     "/v1/batch-match/sample.csv", "/v1/inquiry", "/mcp", "/favicon.ico", "/404",
+    "/privacy", "/terms", "/about", "/static/og.png",
 )
 
 KEY_RE = re.compile(r"[^0-9A-Za-z._:/{}-]")
@@ -513,11 +532,46 @@ def path_key(path: str) -> str:
     return "/404"
 
 
-def record_request(store: Any, method: str, path: str, day: Optional[str] = None) -> None:
+def client_class(user_agent: Any) -> str:
+    """User-Agent → `browser`·`bot`·`other` 3종. 원문은 돌려주지도 저장하지도 않는다."""
+    ua = str(user_agent or "").strip().lower()
+    if not ua:
+        return "other"
+    if any(marker in ua for marker in _BOT_MARKERS):
+        return "bot"
+    if "mozilla" in ua or "safari" in ua or "chrome" in ua or "firefox" in ua:
+        return "browser"
+    return "other"
+
+
+def channel_of(key: str) -> str:
+    """경로 집계 키 → 트래픽 묶음(`CHANNELS`)."""
+    value = str(key or "")
+    if value in ("/mcp", "/v1/mcp"):
+        return "mcp"
+    if value.startswith("/v1/"):
+        return "api"
+    if value in ("/robots.txt", "/llms.txt", "/sitemap.xml",
+                 "/.well-known/mcp/server-card.json"):
+        return "crawler_files"
+    if value.startswith("/static/") or value == "/favicon.ico":
+        return "assets"
+    if value == "/404":
+        return "not_found"
+    return "web"
+
+
+def record_request(store: Any, method: str, path: str, day: Optional[str] = None,
+                   client: Optional[str] = None) -> None:
+    """요청 1건을 경로 버킷에 센다. `client`(`client_class()` 결과)를 주면 종류별로도 센다."""
     if store is None or str(method or "").upper() not in ("GET", "POST"):
         return
+    stamp = day or today_kst()
     try:
-        store.bump_usage(day or today_kst(), KIND_PATH, path_key(path))
+        store.bump_usage(stamp, KIND_PATH, path_key(path))
+        kind = str(client or "").strip().lower()
+        if kind in CLIENT_CLASSES:
+            store.bump_usage(stamp, KIND_CLIENT, kind)
     except Exception:  # noqa: BLE001 - 계측 실패가 응답을 막지 않는다
         pass
 
@@ -591,7 +645,7 @@ def record_tool(store: Any, name: str, result: Any, args: Any = None,
 
 def _empty_day(day: str) -> Dict[str, Any]:
     return {"date": day, "requests": 0, "paths": {}, "tools": {}, "verdicts": {}, "flags": {},
-            "zero_result_queries": _empty_zero_queries()}
+            "clients": {}, "zero_result_queries": _empty_zero_queries()}
 
 
 def _empty_zero_queries() -> Dict[str, Any]:
@@ -654,16 +708,25 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
                 target["verdicts"][key] = count
             elif kind == KIND_FLAG:
                 target["flags"][key] = count
+            elif kind == KIND_CLIENT and key in CLIENT_CLASSES:
+                target["clients"][key] = count
 
     for day, bucket in zero_by_day.items():
         by_day[day]["zero_result_queries"] = _top_zero_queries(bucket)
 
-    totals: Dict[str, Any] = {"requests": 0, "paths": {}, "tools": {}, "verdicts": {}, "flags": {}}
+    totals: Dict[str, Any] = {"requests": 0, "paths": {}, "tools": {}, "verdicts": {}, "flags": {},
+                              "clients": {}}
     for row in empty:
         totals["requests"] += row["requests"]
-        for kind in ("paths", "tools", "verdicts", "flags"):
+        for kind in ("paths", "tools", "verdicts", "flags", "clients"):
             for key, value in row[kind].items():
                 totals[kind][key] = totals[kind].get(key, 0) + value
+
+    # 경로별 합계를 사람이 읽는 묶음으로 접는다 — 같은 숫자, 다른 자름.
+    channels: Dict[str, int] = {}
+    for key, value in totals["paths"].items():
+        bucket = channel_of(key)
+        channels[bucket] = channels.get(bucket, 0) + value
 
     return {
         "ok": True,
@@ -690,8 +753,9 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
                 "limit_ko": ("사람 이름·상호는 낱말만으로 판별할 수 없어 지우지 못합니다. "
                              "입력란에는 제도·분야 낱말 예시를 안내합니다."),
             },
+            "stores_client_class": "browser|bot|other (종류만)",
             "granularity": ("date (YYYY-MM-DD, Asia/Seoul) · 경로 · 툴 · 판정 등급 · 0건/오류 · "
-                            "0건 검색어(비식별, 최대 30자)"),
+                            "0건 검색어(비식별, 최대 30자) · 요청 종류(브라우저/봇/기타)"),
             "inquiries": {
                 "separate_from_usage": True,
                 "in_this_payload": False,
@@ -703,6 +767,16 @@ def stats_payload(store: Any, days: int = DEFAULT_DAYS,
                 "거주지·나이·소득구간·임신 여부 같은 입력값은 저장하지 않습니다. 알 수 없는 경로는 "
                 "/404 한 칸으로 합산하며, 재배포 시 카운터가 초기화될 수 있습니다. 검색어는 결과가 "
                 "0건이었을 때만 지역명·연락처·숫자를 지운 형태로 남겨 다음 데이터 확충에 씁니다."
+            ),
+        },
+        "traffic": {
+            "by_channel": channels,
+            "by_client": totals["clients"],
+            "channel_labels_ko": CHANNEL_LABELS_KO,
+            "note_ko": (
+                "요청을 '사람이 여는 페이지 / 크롤러 파일 / REST API / MCP / 정적 자산 / 없는 주소'로만 "
+                "나누고, 브라우저·봇·기타 종류만 셉니다. User-Agent 원문·IP·쿠키는 저장하지 않으며, "
+                "봇 판별은 문자열 표식으로만 합니다(정확한 판별이 아닌 참고 수치)."
             ),
         },
         "days": empty,

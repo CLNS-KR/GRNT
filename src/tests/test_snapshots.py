@@ -81,8 +81,17 @@ class SnapshotTest(unittest.TestCase):
         diff = snapshots.diff_snapshots(before, after)
         self.assertEqual(diff["counts"], {"added": 0, "removed": 0, "changed": 0})
 
-    def test_compare_days_needs_two(self):
+    def test_compare_days_with_single_day_is_baseline_only(self):
+        """기준일 1장만 있으면 오류(snapshot_missing)가 아니라 baseline_only 로 답한다(0.4.6)."""
         snapshots.save_snapshot(snapshots.build_snapshot(self.services, "2026-11-18"), self.tmp)
+        result = snapshots.compare_days(None, None, self.tmp)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "baseline_only")
+        self.assertEqual(result["to_day"], "2026-11-18")
+        self.assertEqual(result["available_days"], ["2026-11-18"])
+        self.assertIn("1장", result["message_ko"])
+
+    def test_compare_days_without_any_snapshot_reports_missing(self):
         result = snapshots.compare_days(None, None, self.tmp)
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "snapshot_missing")

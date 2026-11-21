@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import gzip
 import json
 import os
 from datetime import date
@@ -28,6 +29,8 @@ from .catalog import data_dir_from_env
 
 SNAPSHOT_DIRNAME = "snapshots"
 INDEX_FILE = "index.json"
+SNAPSHOT_SUFFIX = ".json"
+GZIP_SUFFIX = ".json.gz"
 DIFF_FIELDS: List[str] = ["name", "agency", "field", "deadline_end", "deadline_text",
                           "amount", "target", "recruiting", "track"]
 
@@ -92,48 +95,109 @@ def build_snapshot(services: Iterable[Any], day: Optional[str] = None,
     }
 
 
-def save_snapshot(payload: Dict[str, Any], directory: Optional[str] = None) -> str:
+def save_snapshot(payload: Dict[str, Any], directory: Optional[str] = None,
+                  *, compress: bool = False) -> str:
+    """스냅샷 1장을 원자적으로 쓴다.
+
+    `compress=True` 면 `{날짜}.json.gz` 로 씁니다(저장소·이미지에 넣는 기준일 스냅샷용 —
+    12,000건 기준 9MB → 2MB). 읽는 쪽은 두 형식을 모두 받습니다(`load_snapshot`).
+    같은 날짜의 다른 형식 파일은 지워 하루가 두 장으로 세어지지 않게 합니다.
+    """
     root = directory or snapshot_dir()
     os.makedirs(root, exist_ok=True)
     day = str(payload.get("meta", {}).get("day") or today_kst())
-    target = os.path.join(root, f"{day}.json")
+    suffix = GZIP_SUFFIX if compress else SNAPSHOT_SUFFIX
+    target = os.path.join(root, f"{day}{suffix}")
     tmp = target + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False)
+    raw = json.dumps(payload, ensure_ascii=False)
+    if compress:
+        with open(tmp, "wb") as handle:
+            handle.write(gzip.compress(raw.encode("utf-8"), compresslevel=9, mtime=0))
+    else:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(raw)
     os.replace(tmp, target)
+    other = os.path.join(root, f"{day}" + (SNAPSHOT_SUFFIX if compress else GZIP_SUFFIX))
+    try:
+        if os.path.exists(other):
+            os.remove(other)
+    except OSError:
+        pass
     _update_index(root, day, payload)
     return target
 
 
+def write_snapshot(services: Iterable[Any], day: Optional[str] = None,
+                   directory: Optional[str] = None, *, compress: bool = False,
+                   note_ko: str = "") -> str:
+    """`Service` 목록 → 스냅샷 페이로드 → 저장까지 한 번에.
+
+    `refresh_catalog`·기동 시 기준일 적재가 쓰는 진입점입니다. 반환값은 저장 경로입니다.
+    """
+    payload = build_snapshot(services, day, note_ko=note_ko)
+    return save_snapshot(payload, directory, compress=compress)
+
+
+def _path_for(day: str, root: str) -> Optional[str]:
+    """그 날짜의 스냅샷 파일 경로(원본 우선, 없으면 압축본)."""
+    for suffix in (SNAPSHOT_SUFFIX, GZIP_SUFFIX):
+        path = os.path.join(root, f"{day}{suffix}")
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def load_snapshot(day: str, directory: Optional[str] = None) -> Optional[Dict[str, Any]]:
     root = directory or snapshot_dir()
-    target = os.path.join(root, f"{day}.json")
+    target = _path_for(str(day), root)
+    if not target:
+        return None
     try:
-        with open(target, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, ValueError, json.JSONDecodeError):
+        if target.endswith(GZIP_SUFFIX):
+            with gzip.open(target, "rt", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        else:
+            with open(target, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+    except (OSError, EOFError, ValueError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def days_on_disk(directory: Optional[str] = None) -> List[str]:
+    """디렉터리에 실제로 있는 스냅샷 날짜(색인과 무관)."""
+    root = directory or snapshot_dir()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return []
+    days = set()
+    for name in names:
+        if name.startswith(INDEX_FILE):
+            continue
+        if name.endswith(GZIP_SUFFIX):
+            days.add(name[: -len(GZIP_SUFFIX)])
+        elif name.endswith(SNAPSHOT_SUFFIX) and not name.endswith(".tmp"):
+            days.add(name[: -len(SNAPSHOT_SUFFIX)])
+    return sorted(day for day in days if day)
 
 
 def list_snapshots(directory: Optional[str] = None) -> List[Dict[str, Any]]:
     root = directory or snapshot_dir()
     index = _read_index(root)
-    days = index.get("days") or []
-    if days:
-        return sorted(days, key=lambda row: str(row.get("day") or ""))
-    # 색인이 없으면 파일에서 복구
-    out: List[Dict[str, Any]] = []
-    try:
-        names = sorted(name for name in os.listdir(root) if name.endswith(".json")
-                       and name != INDEX_FILE)
-    except OSError:
-        return []
-    for name in names:
-        payload = load_snapshot(name[:-5], root)
+    rows: Dict[str, Dict[str, Any]] = {}
+    for row in index.get("days") or []:
+        if isinstance(row, dict) and row.get("day"):
+            rows[str(row["day"])] = row
+    # 색인에 없는 날짜(저장소에 함께 커밋한 압축 스냅샷 등)는 파일 메타로 채운다.
+    for day in days_on_disk(root):
+        if day in rows:
+            continue
+        payload = load_snapshot(day, root)
         if payload:
-            out.append(dict(payload.get("meta") or {}))
-    return out
+            rows[day] = dict(payload.get("meta") or {})
+            rows[day].setdefault("day", day)
+    return sorted(rows.values(), key=lambda row: str(row.get("day") or ""))
 
 
 def latest_day(directory: Optional[str] = None) -> Optional[str]:
@@ -229,19 +293,33 @@ def diff_snapshots(before: Dict[str, Any], after: Dict[str, Any],
 def compare_days(day_a: Optional[str], day_b: Optional[str],
                  directory: Optional[str] = None, *, limit: Optional[int] = None,
                  service_id: Optional[str] = None) -> Dict[str, Any]:
-    """스냅샷 두 장을 비교한다(없으면 사유를 그대로 돌려준다)."""
+    """스냅샷 두 장을 비교한다(없으면 사유를 그대로 돌려준다).
+
+    기준일이 **한 장뿐**이면 오류가 아니라 `state: "baseline_only"` 로 답합니다 —
+    프로덕션처럼 아직 하루치만 적재된 상태에서 빈 응답(`snapshot_missing`)을 내지 않고,
+    "기준일 1장은 있고 전일 대비 비교는 다음 적재부터"라고 밝히기 위해서입니다.
+    """
     root = directory or snapshot_dir()
     days = [str(row.get("day")) for row in list_snapshots(root) if row.get("day")]
     latest = day_b or (days[-1] if days else None)
     earlier = day_a
     if not earlier:
         earlier = days[-2] if len(days) >= 2 else None
+    if latest and not earlier:
+        return {"ok": True, "state": "baseline_only", "from_day": None, "to_day": latest,
+                "added": [], "removed": [], "changed": [],
+                "counts": {"added": 0, "removed": 0, "changed": 0},
+                "available_days": days, "snapshot_dir": root,
+                "message_ko": (f"비교 기준일이 {latest} 1장뿐입니다. 기준일은 정상적으로 적재됐고, "
+                               "전일 대비 변화 비교는 다음 적재(매일 04:00 KST 갱신)부터 제공됩니다. "
+                               "지금은 `get_service_meta` 의 카탈로그 통계로 현재 상태를 확인하세요.")}
     if not latest or not earlier:
         return {"ok": False, "error": "snapshot_missing",
                 "available_days": days,
-                "message_ko": ("비교할 스냅샷이 2장 이상 필요합니다. "
-                               "`python -m subsidy_kr.sync_gov24 --sources all` 을 날마다 실행하면 "
-                               "`snapshots/{날짜}.json` 이 쌓입니다.")}
+                "message_ko": ("비교할 스냅샷이 아직 없습니다. "
+                               "`python -m subsidy_kr.refresh_catalog`(또는 `sync_gov24 --sources all`)을 "
+                               "실행하면 `snapshots/{날짜}.json` 이 적재되고, 다음 날부터 전일 대비 "
+                               "비교를 제공합니다.")}
     payload_a = load_snapshot(earlier, root)
     payload_b = load_snapshot(latest, root)
     if not payload_a or not payload_b:
@@ -271,3 +349,21 @@ def history(service_id: str, directory: Optional[str] = None) -> List[Dict[str, 
         if entry:
             out.append({"day": day, **entry})
     return out
+
+
+def ensure_baseline(services: Iterable[Any], directory: Optional[str] = None,
+                    day: Optional[str] = None, *, compress: bool = False) -> Optional[str]:
+    """그 날짜 스냅샷이 없으면 지금 카탈로그로 1장 적재한다(있으면 아무것도 하지 않음).
+
+    배포 이미지에 스냅샷이 한 장도 없는 환경(무료 플랜·새 볼륨)에서도 `compare_ledgers` 가
+    `snapshot_missing` 으로 비지 않게 하는 장치입니다. 기동 시와 카탈로그 갱신 후에 부릅니다.
+    """
+    target_day = day or today_kst()
+    root = directory or snapshot_dir()
+    if _path_for(target_day, root):
+        return None
+    payload = build_snapshot(services, target_day,
+                             note_ko="기동 시 현재 카탈로그로 적재한 기준일 스냅샷입니다.")
+    if not payload.get("services"):
+        return None
+    return save_snapshot(payload, root, compress=compress)
