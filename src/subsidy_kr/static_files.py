@@ -94,7 +94,7 @@ def llms_txt(catalog: Optional[Catalog] = None, base: Optional[str] = None) -> s
 - [내 조건으로 판정]({root}/): 로그인·주민등록번호 없이 30초 조건 선택 → 후보·사유·신청기한.
   상단에서 **개인·가구**와 **창업·소상공인·기업**을 전환합니다.
 - [주제·지역별 모음]({root}/s/): 청년·출산·주거·구직·소상공인·창업·R&D, 시·도별 목록.
-- [시·도별 지원금 허브]({root}/regions/): 17개 시·도마다 지자체 공고 수·분야 분포·마감 임박
+- [시·도별 지원금 허브]({root}/regions/): 16개 시·도마다 지자체 공고 수·분야 분포·마감 임박
   목록·시·군·구별 공고 수를 카탈로그 집계로 정리한 페이지.
 - [질문형 가이드]({root}/guides/): \"청년 월세 지원 조건\" 같은 질문 {guide_count}개에
   한 줄 기준·확인 조건·지금 열린 공고·흔한 오해를 붙인 페이지. FAQPage 구조화 데이터 포함.
@@ -155,7 +155,7 @@ def sitemap_xml(catalog: Catalog, base: Optional[str] = None) -> str:
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>"""]
-    # 시·도별 SEO 허브(/regions/ + 17개) — 지역명 검색 유입의 주 진입점이라 홈 다음에 둔다.
+    # 시·도별 SEO 허브(/regions/ + 16개) — 지역명 검색 유입의 주 진입점이라 홈 다음에 둔다.
     for path in regions.hub_paths():
         priority = "0.8" if path == regions.REGION_HUB_PATH else "0.7"
         entries.append(f"""  <url>

@@ -35,9 +35,14 @@ class SidoTest(unittest.TestCase):
         self.assertIsNone(regions.canonical_sido("화성"))
         self.assertIsNone(regions.canonical_sido(""))
 
-    def test_sido_list_is_17(self):
-        self.assertEqual(len(regions.sido_names()), 17)
-        self.assertEqual(len(list(regions.iter_all_regions())), 250)
+    def test_sido_list_is_16(self):
+        # 2026-07-01 전남광주통합특별시 출범 — 광역단체는 16곳
+        self.assertEqual(len(regions.sido_names()), 16)
+        self.assertIn("전남광주통합특별시", regions.sido_names())
+        self.assertNotIn("광주광역시", regions.sido_names())
+        self.assertNotIn("전라남도", regions.sido_names())
+        # 인천 11개(제물포·영종·서해·검단 포함) — 개편 전 250 + 검단구 1
+        self.assertEqual(len(list(regions.iter_all_regions())), 251)
 
 
 class SigunguTest(unittest.TestCase):
@@ -129,8 +134,8 @@ class MatchTest(unittest.TestCase):
 # 시·도별 SEO 허브 (`/regions/` · `/regions/{slug}`)
 # ---------------------------------------------------------------------------
 EXPECTED_SLUGS = [
-    "seoul", "busan", "daegu", "incheon", "gwangju", "daejeon", "ulsan", "sejong",
-    "gyeonggi", "gangwon", "chungbuk", "chungnam", "jeonbuk", "jeonnam",
+    "seoul", "busan", "daegu", "incheon", "jeonnamgwangju", "daejeon", "ulsan", "sejong",
+    "gyeonggi", "gangwon", "chungbuk", "chungnam", "jeonbuk",
     "gyeongbuk", "gyeongnam", "jeju",
 ]
 
@@ -141,10 +146,10 @@ def _ld_blocks(html_text):
 
 
 class RegionSlugTest(unittest.TestCase):
-    def test_seventeen_slugs(self):
-        self.assertEqual(len(regions.SIDO_SLUGS), 17)
+    def test_sixteen_slugs(self):
+        self.assertEqual(len(regions.SIDO_SLUGS), 16)
         self.assertEqual(regions.sido_slugs(), EXPECTED_SLUGS)
-        self.assertEqual(len(set(EXPECTED_SLUGS)), 17)
+        self.assertEqual(len(set(EXPECTED_SLUGS)), 16)
         for slug in regions.sido_slugs():
             self.assertRegex(slug, r"^[a-z]+$")
             self.assertIsNotNone(regions.sido_for_slug(slug))
@@ -153,13 +158,18 @@ class RegionSlugTest(unittest.TestCase):
     def test_alias_and_unknown_slugs(self):
         self.assertEqual(regions.slug_for_sido("경기"), "gyeonggi")
         self.assertEqual(regions.slug_for_sido("전라북도"), "jeonbuk")
+        self.assertEqual(regions.slug_for_sido("광주광역시"), "jeonnamgwangju")
+        self.assertEqual(regions.slug_for_sido("전라남도"), "jeonnamgwangju")
+        # 개편 전 슬러그는 301 로 살아 있다(server.py LEGACY_SIDO_SLUGS)
+        self.assertEqual(regions.LEGACY_SIDO_SLUGS["gwangju"], "jeonnamgwangju")
+        self.assertEqual(regions.LEGACY_SIDO_SLUGS["jeonnam"], "jeonnamgwangju")
         self.assertIsNone(regions.slug_for_sido("화성"))
         self.assertIsNone(regions.sido_for_slug("no-such-region"))
         self.assertIsNone(regions.sido_for_slug(""))
 
     def test_hub_paths(self):
         paths = regions.hub_paths()
-        self.assertEqual(len(paths), 18)
+        self.assertEqual(len(paths), 17)
         self.assertEqual(paths[0], "/regions/")
         self.assertIn("/regions/incheon", paths)
 
@@ -192,7 +202,7 @@ class RegionHubRenderTest(unittest.TestCase):
         page = regions.render_index(self.catalog)
         for slug in regions.sido_slugs():
             self.assertIn(f'href="/regions/{slug}"', page)
-        self.assertIn("17개 시·도", page)
+        self.assertIn("16개 시·도", page)
         self.assertIn("지역별 지원금", page)
 
     def test_dark_mode_tokens(self):
@@ -255,13 +265,13 @@ class RegionStaticFilesTest(unittest.TestCase):
     def setUp(self):
         self.catalog = sample_catalog()
 
-    def test_sitemap_has_eighteen_region_urls(self):
+    def test_sitemap_has_seventeen_region_urls(self):
         xml = static_files.sitemap_xml(self.catalog, base="https://example.test")
         self.assertIn("<loc>https://example.test/regions/</loc>", xml)
         for slug in regions.sido_slugs():
             self.assertIn(f"<loc>https://example.test/regions/{slug}</loc>", xml)
         region_locs = [line for line in xml.splitlines() if "/regions/" in line]
-        self.assertEqual(len(region_locs), 18)
+        self.assertEqual(len(region_locs), 17)
         self.assertEqual(xml.count("<url>"), xml.count("</url>"))
 
     def test_llms_txt_links_region_hub(self):
@@ -281,8 +291,8 @@ class RegionStaticFilesTest(unittest.TestCase):
         for key in ("tracks", "verdicts", "sido_list", "guides", "tools", "stats", "privacy"):
             self.assertIn(key, result)
         block = result["regions"]
-        self.assertEqual(block["count"], 17)
-        self.assertEqual(len(block["regions"]), 17)
+        self.assertEqual(block["count"], 16)
+        self.assertEqual(len(block["regions"]), 16)
         self.assertEqual(block["index_url"], "https://grnt-kr.onrender.com/regions/")
         self.assertEqual({row["slug"] for row in block["regions"]}, set(EXPECTED_SLUGS))
 
@@ -321,7 +331,7 @@ class RegionHttpTest(unittest.TestCase):
             self.assertEqual(status, 200, path)
             self.assertIn("시·도", body)
 
-    def test_all_seventeen_regions_200(self):
+    def test_all_sixteen_regions_200(self):
         for slug in regions.sido_slugs():
             status, body = self._status(f"/regions/{slug}")
             self.assertEqual(status, 200, slug)
@@ -341,7 +351,26 @@ class RegionHttpTest(unittest.TestCase):
     def test_unknown_slug_404(self):
         status, body = self._status("/regions/no-such-region")
         self.assertEqual(status, 404)
+        # 사람이 잘못 들어온 주소는 JSON 이 아니라 HTML 안내(홈·주제·지역 링크)
+        self.assertIn("<!doctype html>", body)
+        self.assertIn("찾으시는 페이지가 없습니다", body)
+        self.assertIn('href="/"', body)
         self.assertIn("unknown_region", body)
+
+    def test_legacy_sido_slugs_redirect(self):
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+                return None
+
+        opener = urllib.request.build_opener(_NoRedirect)
+        for legacy, target in (("/regions/gwangju", "/regions/jeonnamgwangju"),
+                               ("/regions/jeonnam", "/regions/jeonnamgwangju"),
+                               ("/s/gwangju", "/s/jeonnamgwangju"),
+                               ("/s/jeonnam", "/s/jeonnamgwangju")):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                opener.open(f"http://127.0.0.1:{self.port}{legacy}", timeout=10)
+            self.assertEqual(ctx.exception.code, 301, legacy)
+            self.assertTrue(ctx.exception.headers["Location"].endswith(target), legacy)
 
     def test_sitemap_and_llms_over_http(self):
         status, body = self._status("/sitemap.xml")
@@ -357,7 +386,7 @@ class RegionHttpTest(unittest.TestCase):
         status, body = self._status("/v1/meta")
         self.assertEqual(status, 200)
         payload = json.loads(body)
-        self.assertEqual(payload["result"]["regions"]["count"], 17)
+        self.assertEqual(payload["result"]["regions"]["count"], 16)
 
 
 if __name__ == "__main__":

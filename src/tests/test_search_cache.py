@@ -30,8 +30,12 @@ HAS_DATA = os.path.exists(CATALOG) or os.path.exists(CATALOG + ".gz")
 
 
 def reference_search(catalog, profile, *, limit=20, include_ineligible=False, tag=None,
-                     keyword=None, max_scan=20000, include_closed=False):
-    """캐시 도입 전 `search()` 와 같은 계산(비교 기준). 캐시를 전혀 쓰지 않는다."""
+                     keyword=None, max_scan=20000, include_closed=False, verdict=None):
+    """캐시 도입 전 `search()` 와 같은 계산(비교 기준). 캐시를 전혀 쓰지 않는다.
+
+    `balance_kinds`/`balance_verdicts` 는 상한 배분 규칙이라 여기서는 재현하지 않는다
+    (그 옵션은 `BalanceSelectionTest` 가 따로 검증한다).
+    """
     region = profile["region"]
     pool = catalog.services[:max_scan]
     if region.get("level") in ("sido", "sigungu"):
@@ -66,11 +70,30 @@ def reference_search(catalog, profile, *, limit=20, include_ineligible=False, ta
     track_counts = {programs.TRACK_PERSONAL: 0, programs.TRACK_BUSINESS: 0}
     for row in results:
         track_counts[row["track"]] = track_counts.get(row["track"], 0) + 1
+    shown_counts = {code: 0 for code in models.VERDICT_ORDER}
+    kind_counts = {"grant": 0, "program": 0}
+    kind_verdict_counts = {kind: {code: 0 for code in models.VERDICT_ORDER}
+                           for kind in ("grant", "program")}
+    for row in shown:
+        code = row["verdict"]["code"]
+        kind = "program" if row.get("benefit_kind") == "program" else "grant"
+        shown_counts[code] += 1
+        kind_counts[kind] += 1
+        kind_verdict_counts[kind][code] += 1
+    filtered = shown if not verdict else [
+        row for row in shown if row["verdict"]["code"] == verdict]
+    picked = filtered[:max(1, limit)]
     return {
         "counts": counts,
+        "shown_counts": shown_counts,
+        "kind_counts": kind_counts,
+        "kind_verdict_counts": kind_verdict_counts,
         "scanned": len(results),
-        "results": shown[:max(1, limit)],
-        "truncated": len(shown) > limit,
+        "matched_total": len(filtered),
+        "returned": len(picked),
+        "results": picked,
+        "truncated": len(filtered) > limit,
+        "verdict_filter": verdict,
         "ineligible_hidden": counts[models.VERDICT_INELIGIBLE] if not include_ineligible else 0,
         "track": track,
         "track_counts": track_counts,

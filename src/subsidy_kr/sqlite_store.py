@@ -112,6 +112,8 @@ def build_sqlite_from_rows(
         meta_to_save = dict(meta)
         meta_to_save["_closed_business_count"] = closed_biz_count
         meta_to_save["_expired_count"] = expired_count
+        # 지역 택소노미 버전 — 개편으로 sido·sigungu 열이 낡으면 load_catalog 가 다시 만든다.
+        meta_to_save["region_schema"] = regions.SCHEMA_VERSION
         for k, v in meta_to_save.items():
             conn.execute(
                 "INSERT INTO meta (key, value_json) VALUES (?, ?)",

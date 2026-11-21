@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .catalog import Catalog, tag_label
-from . import site_verification
+from . import regions, site_verification
 
 MIN_INDEX_ITEMS = 5
 # 한 페이지에 보여 줄 최대 제도 수(실데이터에서 400건짜리 주제도 한 장에 담기지 않게)
@@ -59,15 +59,8 @@ TOPICS: List[Dict[str, Any]] = [
      "intro": "기술창업·중소기업 R&D와 사업화를 지원하는 사업입니다."},
 ]
 
-SIDO_SLUGS: Dict[str, str] = {
-    "서울특별시": "seoul", "부산광역시": "busan", "대구광역시": "daegu",
-    "인천광역시": "incheon", "광주광역시": "gwangju", "대전광역시": "daejeon",
-    "울산광역시": "ulsan", "세종특별자치시": "sejong", "경기도": "gyeonggi",
-    "강원특별자치도": "gangwon", "충청북도": "chungbuk", "충청남도": "chungnam",
-    "전북특별자치도": "jeonbuk", "전라남도": "jeonnam", "경상북도": "gyeongbuk",
-    "경상남도": "gyeongnam", "제주특별자치도": "jeju",
-}
-SLUG_TO_SIDO = {slug: sido for sido, slug in SIDO_SLUGS.items()}
+SIDO_SLUGS = regions.SIDO_SLUGS
+SLUG_TO_SIDO = regions.SLUG_TO_SIDO
 
 
 def _collect(all_services: List[Any], spec: Dict[str, Any]) -> List[Any]:
@@ -118,7 +111,7 @@ def items(catalog: Catalog) -> List[Dict[str, Any]]:
     """렌더 가능한 페이지 목록(제도 1건 이상).
 
     카탈로그는 읽기 전용이므로 한 번 만든 목록을 재사용한다. 만드는 데 카탈로그 전체를
-    주제 18 + 지역 17 번 훑기 때문에(실데이터 1.2만 건) 요청마다 다시 만들면 `/s/`·
+    주제 18 + 지역 16 번 훑기 때문에(실데이터 1.2만 건) 요청마다 다시 만들면 `/s/`·
     `/s/{slug}`·`/sitemap.xml` 이 수 초 걸린다.
     """
     cached = catalog.memo.get("pseo_items")
@@ -296,7 +289,7 @@ def render_item(slug: str, catalog: Catalog) -> Optional[str]:
 </main>
 """
     return _page(
-        f"{page['title']} 총정리 (2026) | SUBSIDY-KR",
+        f"{page['title']} 총정리 (2026) | GRNT",
         f"{page['title']} {len(services)}건의 지원대상·금액·신청기한·문의처 정리. 자격 코드 기반 사전 점검.",
         body,
         noindex=noindex,

@@ -525,6 +525,28 @@ def read_catalog_payload(path: str) -> Any:
         return json.load(handle)
 
 
+def _sqlite_region_schema(db_path: str) -> Any:
+    """SQLite 인덱스를 만든 때의 지역 택소노미 버전(없으면 None)."""
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                "SELECT value_json FROM meta WHERE key = 'region_schema'"
+            ).fetchone()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error, ValueError):
+        return None
+    if not row:
+        return None
+    try:
+        return json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
 def load_catalog(path: Optional[str] = None) -> Catalog:
     """동기화 산출물(원본 또는 압축본)이 있으면 그것을, 없으면 샘플을 읽는다.
 
@@ -545,6 +567,10 @@ def load_catalog(path: Optional[str] = None) -> Catalog:
                 not os.path.exists(db_path)
                 or os.path.getmtime(source) > os.path.getmtime(db_path)
             )
+            if not need_build:
+                # 행정개편으로 지역 이름이 바뀌었는데 DB 가 옛 택소노미면 다시 만든다.
+                # (그대로 두면 sido·sigungu 로 거르는 SQL 이 새 지역 사용자를 놓친다.)
+                need_build = _sqlite_region_schema(db_path) != regions.SCHEMA_VERSION
             if need_build:
                 payload = read_catalog_payload(source)
                 rows = payload.get("services") or []

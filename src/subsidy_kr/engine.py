@@ -1103,9 +1103,95 @@ def _copy_result(result: Dict[str, Any]) -> Dict[str, Any]:
     """캐시에서 꺼낸 결과를 호출자가 바꿔도 캐시가 오염되지 않게 겉껍질을 복사한다."""
     copy = dict(result)
     copy["counts"] = dict(result["counts"])
+    copy["shown_counts"] = dict(result["shown_counts"])
     copy["track_counts"] = dict(result["track_counts"])
+    copy["kind_counts"] = dict(result["kind_counts"])
+    copy["kind_verdict_counts"] = {
+        kind: dict(codes) for kind, codes in result["kind_verdict_counts"].items()
+    }
     copy["results"] = [dict(row) for row in result["results"]]
     return copy
+
+
+KIND_GRANT = "grant"
+KIND_PROGRAM = "program"
+KINDS: Tuple[str, str] = (KIND_GRANT, KIND_PROGRAM)
+
+
+def _kind_of(row: Dict[str, Any]) -> str:
+    return KIND_PROGRAM if row.get("benefit_kind") == "program" else KIND_GRANT
+
+
+def _allocate(budget: int, sizes: Dict[str, int]) -> Dict[str, int]:
+    """한정된 자리(budget)를 그룹 크기에 비례해 나누되 **비어 있지 않은 그룹은 1건씩 보장**한다.
+
+    예전 `balance_kinds` 는 창업 트랙처럼 '받을 가능성 높음'이 상한을 다 채우는 경우
+    '조건 확인 필요'가 한 건도 나오지 않아 2단 필터가 사라졌다. 그룹마다 최소 1건을
+    남겨 두면 어떤 판정 그룹도 화면에서 도달할 수 있다.
+    """
+    keys = [key for key, size in sizes.items() if size > 0]
+    alloc = {key: 0 for key in sizes}
+    if budget <= 0 or not keys:
+        return alloc
+    if budget < len(keys):
+        for key in keys[:budget]:
+            alloc[key] = 1
+        return alloc
+    for key in keys:
+        alloc[key] = 1
+    remaining = budget - len(keys)
+    spare = sum(sizes[key] - 1 for key in keys)
+    if remaining <= 0 or spare <= 0:
+        return alloc
+    shares = {key: (sizes[key] - 1) * remaining / spare for key in keys}
+    for key in keys:
+        alloc[key] += int(shares[key])
+    left = budget - sum(alloc.values())
+    for key in sorted(keys, key=lambda k: shares[k] - int(shares[k]), reverse=True):
+        if left <= 0:
+            break
+        if alloc[key] < sizes[key]:
+            alloc[key] += 1
+            left -= 1
+    return alloc
+
+
+def _balanced_slice(shown: List[Dict[str, Any]], cap: int, *,
+                    balance_kinds: bool, balance_verdicts: bool) -> List[Dict[str, Any]]:
+    """상한(cap) 안에서 종류·판정 그룹이 골고루 들어가게 자른다 — 화면에는 원래 순서대로."""
+    if cap >= len(shown):
+        return list(shown)
+    if not (balance_kinds or balance_verdicts):
+        return shown[:cap]
+
+    def pick(rows: List[Dict[str, Any]], budget: int,
+             group_of) -> List[Dict[str, Any]]:
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            groups.setdefault(group_of(row), []).append(row)
+        alloc = _allocate(budget, {key: len(value) for key, value in groups.items()})
+        picked_ids = set()
+        for key, rows_in_group in groups.items():
+            for row in rows_in_group[:alloc.get(key, 0)]:
+                picked_ids.add(id(row))
+        return [row for row in rows if id(row) in picked_ids]
+
+    kind_sizes = {kind: sum(1 for row in shown if _kind_of(row) == kind) for kind in KINDS}
+    if balance_kinds and all(kind_sizes[kind] for kind in KINDS) and cap >= 4:
+        kind_alloc = _allocate(cap, kind_sizes)
+        picked: List[Dict[str, Any]] = []
+        for kind in KINDS:
+            subset = [row for row in shown if _kind_of(row) == kind]
+            budget = kind_alloc.get(kind, 0)
+            if balance_verdicts:
+                picked.extend(pick(subset, budget, lambda row: row["verdict"]["code"]))
+            else:
+                picked.extend(subset[:budget])
+        chosen = {id(row) for row in picked}
+        return [row for row in shown if id(row) in chosen]
+    if balance_verdicts:
+        return pick(shown, cap, lambda row: row["verdict"]["code"])
+    return shown[:cap]
 
 
 def _candidate_pool(catalog: Catalog, profile: Dict[str, Any], *, max_scan: int,
@@ -1178,17 +1264,26 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
            include_ineligible: bool = False, tag: Optional[str] = None,
            keyword: Optional[str] = None, max_scan: int = 20000,
            include_closed: bool = False, balance_kinds: bool = False,
-           expand_keyword: bool = False) -> Dict[str, Any]:
+           expand_keyword: bool = False,
+           balance_verdicts: bool = False, verdict: Optional[str] = None) -> Dict[str, Any]:
     """프로필로 후보 제도를 판정한다. 트랙·지역·마감 여부로 후보를 줄인 뒤 판정한다.
 
     `expand_keyword=True` 면 키워드를 `synonyms` 사전으로 넓혀 본다("전기세"→"전기요금" 등).
     넓혀 걸린 제도는 질의어를 그대로 담은 제도 뒤에 놓이고, 기본값(False)은 예전처럼
     질의어 그대로의 부분 일치 AND 만 본다 — 화면·API 처럼 사용자가 직접 검색하는 경로만 켠다.
+
+    `counts` 는 **판정한 전체(상한 전)** 집계이고, `kind_counts`·`kind_verdict_counts` 는
+    화면 탭 숫자용으로 **보여 줄 후보(해당 없음 제외)** 를 센 값이다. `results` 는 상한만큼만
+    돌아오므로 탭 숫자를 `results` 에서 세면 안 된다(예전 34/16 처럼 할당량이 건수로 새어 나갔다).
+
+    `verdict` 를 주면 그 판정만 돌려준다(예: `check_needed` 253건 전체를 보는 재조회 경로).
+    이때도 `counts`·`kind_*_counts` 는 필터 전 기준을 유지해 탭 숫자가 흔들리지 않는다.
     """
     cache = _result_cache(catalog)
     cache_key = (profile_key(profile), int(limit), bool(include_ineligible),
                  tag or "", keyword or "", int(max_scan), bool(include_closed),
-                 bool(balance_kinds), bool(expand_keyword))
+                 bool(balance_kinds), bool(expand_keyword), bool(balance_verdicts),
+                 verdict or "")
     hit = cache.get(cache_key)
     if hit is not None:
         return _copy_result(hit)
@@ -1229,26 +1324,40 @@ def search(catalog: Catalog, profile: Dict[str, Any], *, limit: int = 20,
     for row in results:
         track_counts[row["track"]] = track_counts.get(row["track"], 0) + 1
 
+    # 화면 탭 숫자 — 상한에 잘리기 전, 보여 줄 후보 전체를 센다.
+    shown_counts: Dict[str, int] = {code: 0 for code in models.VERDICT_ORDER}
+    kind_counts: Dict[str, int] = {kind: 0 for kind in KINDS}
+    kind_verdict_counts: Dict[str, Dict[str, int]] = {
+        kind: {code: 0 for code in models.VERDICT_ORDER} for kind in KINDS
+    }
+    for row in shown:
+        code = row["verdict"]["code"]
+        kind = _kind_of(row)
+        shown_counts[code] += 1
+        kind_counts[kind] += 1
+        kind_verdict_counts[kind][code] += 1
+
+    # 판정 하나만 보기 — 상한에 걸렸던 '조건 확인 필요' 전체를 다시 받는 길.
+    filtered = shown
+    if verdict:
+        filtered = [row for row in shown if row["verdict"]["code"] == verdict]
+    matched_total = len(filtered)
+
     cap = max(1, limit)
-    if balance_kinds:
-        grants = [r for r in shown if r.get("benefit_kind") != "program"]
-        progs = [r for r in shown if r.get("benefit_kind") == "program"]
-        if grants and progs and cap >= 4:
-            p_quota = min(len(progs), max(1, cap // 3))
-            g_quota = min(len(grants), cap - p_quota)
-            if g_quota + p_quota < cap:
-                p_quota = min(len(progs), cap - g_quota)
-            picked = grants[:g_quota] + progs[:p_quota]
-        else:
-            picked = shown[:cap]
-    else:
-        picked = shown[:cap]
+    picked = _balanced_slice(filtered, cap, balance_kinds=balance_kinds,
+                             balance_verdicts=balance_verdicts)
 
     result = {
         "counts": counts,
+        "shown_counts": shown_counts,
+        "kind_counts": kind_counts,
+        "kind_verdict_counts": kind_verdict_counts,
         "scanned": len(results),
+        "matched_total": matched_total,
+        "returned": len(picked),
         "results": picked,
-        "truncated": len(shown) > limit,
+        "truncated": matched_total > cap,
+        "verdict_filter": verdict,
         "ineligible_hidden": (counts[models.VERDICT_INELIGIBLE]
                               if not include_ineligible else 0),
         "track": track,

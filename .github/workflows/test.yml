@@ -51,6 +51,13 @@ jobs:
           assert status == 200
           status, body = get("/guides/cheongnyeon-wolse")
           assert status == 200 and b"FAQPage" in body
+          status, body = get("/regions/")
+          assert status == 200 and b"/regions/seoul" in body
+          status, body = get("/regions/gyeonggi")
+          assert status == 200 and b"FAQPage" in body and b"application/ld+json" in body
+          _, sitemap = get("/sitemap.xml")
+          # 허브 1 + 시·도 16 (2026-07-01 전남광주통합특별시 출범)
+          assert sitemap.count(b"/regions/") == 17
           status, body = get("/v1/batch-match/sample.csv")
           assert status == 200 and b"client_ref" in body
           request = urllib.request.Request(

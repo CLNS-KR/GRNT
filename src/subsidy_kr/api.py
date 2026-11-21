@@ -114,14 +114,21 @@ def _result_row(row: Dict[str, Any], *, detail: bool = False) -> Dict[str, Any]:
 def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = None) -> Dict[str, Any]:
     profile = _profile_from_args(args)
     limit = int(args.get("limit") or 10)
+    verdict = str(args.get("verdict") or "").strip()
+    if verdict and verdict not in models.VERDICT_ORDER:
+        raise ValueError("unknown_verdict")
+    # 상한을 50으로 두면 실제 '조건 확인 필요'(실데이터 개인 수백 건)가 화면에서 사라진다.
+    api_limit = max(1, min(limit, 200))
     result = engine.search(
         catalog, profile,
-        limit=max(1, min(limit, 50)),
+        limit=api_limit,
         include_ineligible=bool(args.get("include_ineligible")),
         include_closed=bool(args.get("include_closed")),
         tag=str(args.get("tag") or "").strip() or None,
         keyword=str(args.get("keyword") or "").strip() or None,
         balance_kinds=bool(args.get("balance_kinds")),
+        balance_verdicts=bool(args.get("balance_verdicts")),
+        verdict=verdict or None,
         # 사용자가 직접 치는 검색어는 동의어까지 본다(“전기세”→“전기요금” 등).
         expand_keyword=True,
     )
@@ -131,7 +138,14 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         "track": result["track"],
         "track_counts": result["track_counts"],
         "counts": result["counts"],
+        "shown_counts": result["shown_counts"],
+        "kind_counts": result["kind_counts"],
+        "kind_verdict_counts": result["kind_verdict_counts"],
         "scanned": result["scanned"],
+        "matched_total": result["matched_total"],
+        "returned": result["returned"],
+        "limit": api_limit,
+        "verdict_filter": result["verdict_filter"],
         "truncated": result["truncated"],
         "ineligible_hidden": result["ineligible_hidden"],
         "closed_hidden": result["closed_hidden"],
@@ -142,6 +156,18 @@ def tool_search_subsidies(args: Dict[str, Any], catalog: Catalog, store: Any = N
         "next_questions": profile["missing_core"],
         "scope_limits_ko": SCOPE_LIMITS_KO,
     }
+    if result["truncated"]:
+        payload["truncated_note_ko"] = (
+            f"조건에 맞는 후보 {result['matched_total']:,}건 중 상위 {result['returned']:,}건을 "
+            "돌려줬습니다. 나머지를 보려면 verdict(check_needed 등)로 판정을 나누거나 "
+            "지역·소득구간·상황을 좁혀 주세요."
+        )
+    if result["verdict_filter"]:
+        code = result["verdict_filter"]
+        payload["verdict_note_ko"] = (
+            f"'{models.VERDICT_LABELS_KO.get(code, code)}' 판정만 골라 돌려줬습니다."
+            " counts·kind_counts 는 필터 전 전체 기준입니다."
+        )
     keyword_note = synonyms.describe(str(args.get("keyword") or ""))
     if keyword_note:
         payload["keyword_note_ko"] = (
@@ -711,7 +737,15 @@ TOOL_DEFS: List[Dict[str, Any]] = [
                 "profile": PROFILE_SCHEMA,
                 "track": {"type": "string", "enum": ["all", "personal", "business"],
                           "description": "트랙 선택. business 면 창업·기업 공고만 봅니다."},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 10,
+                          "description": "돌려줄 최대 건수(최대 200). 탭·집계 숫자는 counts·kind_counts 로 함께 오고 상한에 잘리지 않는다."},
+                "verdict": {"type": "string",
+                            "enum": list(models.VERDICT_ORDER),
+                            "description": "이 판정만 돌려받는다(예: check_needed 253건 전체 보기). counts 는 필터 전 기준."},
+                "balance_kinds": {"type": "boolean", "default": False,
+                                  "description": "지원금·바우처와 교육·건강·프로그램을 예산 비율로 함께 돌려준다."},
+                "balance_verdicts": {"type": "boolean", "default": False,
+                                     "description": "상한 안에 판정 그룹(가능성·확인 필요·정보 부족)을 최소 1건씩 넣는다."},
                 "include_ineligible": {"type": "boolean", "default": False,
                                        "description": "해당 없음까지 포함할지"},
                 "include_closed": {"type": "boolean", "default": False,

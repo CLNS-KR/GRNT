@@ -18,13 +18,18 @@ from urllib.parse import quote
 
 from .regions_data import SIGUNGU_BY_SIDO as _RAW_SIGUNGU_BY_SIDO
 
+# 지역 택소노미 버전 — 개편으로 이름·구성이 바뀌면 올린다.
+# `catalog.load_catalog` 가 SQLite 인덱스(지역 컬럼)를 이 값으로 검사해 다시 만듭니다.
+SCHEMA_VERSION = "2026-07-01"
+
 # 시도 정식 명칭 → 코드 앞 2자리
+# 2026-07-01 부터 광역단체는 16곳입니다(전남광주통합특별시 출범).
 SIDO_CODES: Dict[str, str] = {
     "서울특별시": "11",
     "부산광역시": "26",
     "대구광역시": "27",
     "인천광역시": "28",
-    "광주광역시": "29",
+    "전남광주통합특별시": "46",
     "대전광역시": "30",
     "울산광역시": "31",
     "세종특별자치시": "36",
@@ -33,19 +38,22 @@ SIDO_CODES: Dict[str, str] = {
     "충청북도": "43",
     "충청남도": "44",
     "전북특별자치도": "45",
-    "전라남도": "46",
     "경상북도": "47",
     "경상남도": "48",
     "제주특별자치도": "50",
 }
 
 # 짧은 이름·개편 전 이름·흔한 표기
+# 통합 전 `광주광역시`·`전라남도` 는 통합시 이름으로 읽습니다(공고 원문·기존 링크 호환).
 SIDO_ALIASES: Dict[str, str] = {
     "서울": "서울특별시", "서울시": "서울특별시",
     "부산": "부산광역시", "부산시": "부산광역시",
     "대구": "대구광역시", "대구시": "대구광역시",
     "인천": "인천광역시", "인천시": "인천광역시",
-    "광주": "광주광역시", "광주시": "광주광역시",
+    "광주": "전남광주통합특별시", "광주시": "전남광주통합특별시",
+    "광주광역시": "전남광주통합특별시",
+    "전남": "전남광주통합특별시", "전라남도": "전남광주통합특별시",
+    "전남광주": "전남광주통합특별시", "전남광주특별시": "전남광주통합특별시",
     "대전": "대전광역시", "대전시": "대전광역시",
     "울산": "울산광역시", "울산시": "울산광역시",
     "세종": "세종특별자치시", "세종시": "세종특별자치시",
@@ -54,20 +62,32 @@ SIDO_ALIASES: Dict[str, str] = {
     "충북": "충청북도", "충청북도": "충청북도",
     "충남": "충청남도", "충청남도": "충청남도",
     "전북": "전북특별자치도", "전라북도": "전북특별자치도",
-    "전남": "전라남도", "전라남도": "전라남도",
     "경북": "경상북도", "경상북도": "경상북도",
     "경남": "경상남도", "경상남도": "경상남도",
     "제주": "제주특별자치도", "제주도": "제주특별자치도",
     "제주특별자치도": "제주특별자치도",
 }
 
-# 시군구 명부에 남아 있는 개편 전 이름 (2023-07 배포본 기준)
+# 시군구 명부에 남아 있는 개편 전 이름
 SIGUNGU_ALIASES: Dict[str, str] = {
     "미추홀구": "미추홀구",
     "부천": "부천시",
     "청주": "청주시 흥덕구",
     "서구": "서해구",
     "인천서구": "서해구",
+}
+
+# 시도별로만 통하는 개편 전·통칭 (전국 공통 별칭으로 두면 다른 시도의 같은 이름을 덮어쓴다)
+SIGUNGU_ALIASES_BY_SIDO: Dict[str, Dict[str, str]] = {
+    "인천광역시": {
+        # 2026-07-01 개편 전 이름 — 공고 원문·묶은 데이터에 그대로 남아 있다
+        "중구": "제물포구",
+        "동구": "제물포구",
+        "서구": "서해구",
+        "제물포": "제물포구",
+        "영종": "영종구",
+        "검단": "검단구",
+    },
 }
 
 _PROVINCE_SUFFIX = ("특별시", "광역시", "특별자치시", "특별자치도", "도")
@@ -89,6 +109,9 @@ for _raw_sido, _raw_rows in _RAW_SIGUNGU_BY_SIDO.items():
 _SIGUNGU_INDEX: Dict[str, List[str]] = {}
 # 접미사(시·군·구)를 뗀 짧은 이름 → 소속 시도들 (`구리도시공사`, `남동문화재단` 같은 기관명용)
 _SHORT_INDEX: Dict[str, List[str]] = {}
+# 구가 있는 도시의 '시' 이름 → 소속 시도들 (`수원문화재단`, `천안도시공사`)
+# 명부에는 `수원시 장안구`처럼 구까지 붙어 있어 '수원'만으로는 _SHORT_INDEX 에 걸리지 않는다.
+_CITY_INDEX: Dict[str, List[str]] = {}
 for _sido, _rows in SIGUNGU_BY_SIDO.items():
     for _code, _name in _rows:
         short = _name.split()[-1] if " " in _name else _name
@@ -102,6 +125,16 @@ for _sido, _rows in SIGUNGU_BY_SIDO.items():
             _SHORT_INDEX.setdefault(stem, [])
             if _sido not in _SHORT_INDEX[stem]:
                 _SHORT_INDEX[stem].append(_sido)
+        head = _name.split()[0] if " " in _name else _name
+        if head.endswith("시") and len(head) >= 3:
+            city = head[:-1]
+            # '광주시'(경기도)는 광주광역시와 헷갈리므로 도시 색인에서 뺀다 —
+            # 기관명 중간의 '광주'는 시도 이름 검사에서 통합시로 읽는다.
+            if city == "광주":
+                continue
+            _CITY_INDEX.setdefault(city, [])
+            if _sido not in _CITY_INDEX[city]:
+                _CITY_INDEX[city].append(_sido)
 
 
 def sido_names() -> List[str]:
@@ -148,7 +181,10 @@ def canonical_sigungu(sido: Optional[str], value: Optional[str]) -> Optional[str
     candidates: List[str] = []
     for _code, name in rows:
         compact = name.replace(" ", "")
-        if raw == compact or compact.endswith(raw) or raw.endswith(compact):
+        # 이름 조각의 끝이 우연히 같다고 잡으면 '동구'가 '남동구'로 붙는다.
+        # 구·군 단위는 명부에 있는 **온전한 이름**(또는 띄어쓰기 뒤 마지막 토큰)과만 맞춘다.
+        short = name.split()[-1]
+        if raw == compact or raw == short or raw.endswith(compact):
             candidates.append(name)
     if len(candidates) == 1:
         return candidates[0]
@@ -166,6 +202,10 @@ def canonical_sigungu(sido: Optional[str], value: Optional[str]) -> Optional[str
         return stems[0]
     if raw in SIGUNGU_ALIASES:
         alias = SIGUNGU_ALIASES[raw]
+        return alias if any(alias == name for _c, name in rows) else None
+    per_sido = SIGUNGU_ALIASES_BY_SIDO.get(province or "", {})
+    if raw in per_sido:
+        alias = per_sido[raw]
         return alias if any(alias == name for _c, name in rows) else None
     return None
 
@@ -216,17 +256,25 @@ def parse_agency_region(agency_name: Optional[str]) -> Dict[str, str]:
     """소관기관명에서 지역을 읽는다.
 
     1. 시도 이름으로 시작하면 그 시도를 쓰고, 이어지는 시군구 이름을 찾는다.
-    2. 시도가 없으면 시군구 이름으로 역추적한다(유일할 때만).
-    3. 지자체처럼 보이는데 특정할 수 없으면 `local_unresolved`로 남긴다.
+    2. 시도 이름이 중간에 있으면(`재단법인경상북도인재평생교육재단`) 그 시도를 쓴다.
+    3. 시도가 없으면 시군구·도시 이름으로 역추적한다(유일할 때만).
+       — 구가 있는 도시(`수원문화재단`·`천안도시공사`)는 **시 단위 소관**으로 보고
+         시도 레벨로 둔다. 사용자가 구를 골라도 같은 시도라 어긋나지 않는다.
+    4. 지자체처럼 보이는데 특정할 수 없으면 `local_unresolved`로 남긴다.
+
+    `전국(national)`은 이 판정에서 시도·시군구를 하나도 찾지 못했을 때만 돌려준다.
+    지자체·지역 재단 이름이 '전국'으로 새는 것을 막는 지점이다.
     """
     raw = re.sub(r"\s+", "", str(agency_name or ""))
     if not raw:
         return {"level": "unknown", "sido": "", "sigungu": "", "label": "소관기관 미기재"}
 
-    # '광주시'는 광주광역시와 경기도 광주시가 겹친다 — 기관명에서는 찍지 않는다.
+    # '광주시'는 (개편 전) 광주광역시와 경기도 광주시가 겹친다 — 기관명에서는 찍지 않는다.
+    # 다만 이제 광주광역시가 통합시 이름으로 바뀌었으므로, '광주' 만 있는 기관명은
+    # 아래 시도 이름 검사에서 통합시로 읽는다.
     if raw.startswith("광주시") and not raw.startswith("광주광역시"):
         return {"level": "local_unresolved", "sido": "", "sigungu": "광주시",
-                "label": "광주시(광주광역시/경기도 광주시 미확인)"}
+                "label": "광주시(전남광주통합특별시/경기도 광주시 미확인)"}
 
     province = None
     matched_prefix = ""
@@ -261,6 +309,25 @@ def parse_agency_region(agency_name: Optional[str]) -> Dict[str, str]:
                     "label": f"{province} {district}"}
         return {"level": "sido", "sido": province, "sigungu": "", "label": province}
 
+    # 시도 이름이 기관명 중간에 있는 경우 — '재단법인경상북도인재평생교육재단',
+    # '(재)충청북도문화재연구원', '재단법인광주문화재단'
+    for name in sorted(list(SIDO_CODES) + list(SIDO_ALIASES), key=len, reverse=True):
+        if len(name) < 2 or name not in raw:
+            continue
+        inside = SIDO_ALIASES.get(name, name)
+        rest = raw.split(name, 1)[1]
+        district = canonical_sigungu(inside, rest[:8]) if rest else None
+        if district is None and rest:
+            for length in range(len(rest), 1, -1):
+                district = canonical_sigungu(inside, rest[:length])
+                if district:
+                    break
+        if district:
+            return {"level": "sigungu", "sido": inside, "sigungu": district,
+                    "label": f"{inside} {district}"}
+        return {"level": "sido", "sido": inside, "sigungu": "", "label": inside}
+
+    ambiguous: str = ""
     for name, sidos in sorted(_SIGUNGU_INDEX.items(), key=lambda kv: -len(kv[0])):
         if len(name) < 2 or name not in raw:
             continue
@@ -269,18 +336,35 @@ def parse_agency_region(agency_name: Optional[str]) -> Dict[str, str]:
             if district:
                 return {"level": "sigungu", "sido": sidos[0], "sigungu": district,
                         "label": f"{sidos[0]} {district}"}
-        else:
-            return {"level": "local_unresolved", "sido": "", "sigungu": name,
-                    "label": f"{name}(시도 미확인)"}
+        elif not ambiguous:
+            ambiguous = name
 
     # '구리도시공사', '남동문화재단'처럼 접미사가 생략된 기관명 (앞에 수식어가 붙기도 한다)
     for stem, sidos in sorted(_SHORT_INDEX.items(), key=lambda kv: -len(kv[0])):
         if stem not in raw or len(sidos) != 1:
+            if stem in raw and len(stem) >= 2 and not ambiguous:
+                ambiguous = stem
             continue
         district = canonical_sigungu(sidos[0], stem)
         if district:
             return {"level": "sigungu", "sido": sidos[0], "sigungu": district,
                     "label": f"{sidos[0]} {district}"}
+
+    # 구가 있는 도시의 '시' 이름 — '수원문화재단', '천안도시공사', '안산인재육성재단'
+    for city, sidos in sorted(_CITY_INDEX.items(), key=lambda kv: -len(kv[0])):
+        if len(city) < 2 or city not in raw:
+            continue
+        if len(sidos) == 1:
+            # 시 단위 소관 → 시도 레벨(같은 시도 어디서든 지역 요건은 맞는다).
+            # 표시는 "경기도 수원시"로 구체적으로 남긴다.
+            return {"level": "sido", "sido": sidos[0], "sigungu": "",
+                    "label": f"{sidos[0]} {city}시"}
+        if not ambiguous:
+            ambiguous = city
+
+    if ambiguous:
+        return {"level": "local_unresolved", "sido": "", "sigungu": ambiguous,
+                "label": f"{ambiguous}(시도 미확인)"}
 
     if any(prefix in raw for prefix in _LOCAL_PREFIXES) or raw.endswith(_PROVINCE_SUFFIX):
         return {"level": "local_unresolved", "sido": "", "sigungu": "", "label": raw[:40]}
@@ -347,7 +431,7 @@ SIDO_SLUGS: Dict[str, str] = {
     "부산광역시": "busan",
     "대구광역시": "daegu",
     "인천광역시": "incheon",
-    "광주광역시": "gwangju",
+    "전남광주통합특별시": "jeonnamgwangju",
     "대전광역시": "daejeon",
     "울산광역시": "ulsan",
     "세종특별자치시": "sejong",
@@ -356,12 +440,17 @@ SIDO_SLUGS: Dict[str, str] = {
     "충청북도": "chungbuk",
     "충청남도": "chungnam",
     "전북특별자치도": "jeonbuk",
-    "전라남도": "jeonnam",
     "경상북도": "gyeongbuk",
     "경상남도": "gyeongnam",
     "제주특별자치도": "jeju",
 }
 SLUG_TO_SIDO: Dict[str, str] = {slug: sido for sido, slug in SIDO_SLUGS.items()}
+
+# 통합 전 슬러그 — 이미 검색엔진에 색인된 주소라 301 로 살려 둔다(server.py).
+LEGACY_SIDO_SLUGS: Dict[str, str] = {
+    "gwangju": "jeonnamgwangju",
+    "jeonnam": "jeonnamgwangju",
+}
 
 # 시·군·구 명부가 개편 전 이름으로 남아 있는 시도(명부는 2023-07 배포본 기준)
 _SIGUNGU_KEY_FALLBACK: Dict[str, str] = {"전북특별자치도": "전라북도"}
@@ -372,8 +461,12 @@ SIDO_STRUCTURE: Dict[str, str] = {
                  "받을 수 있는 제도가 달라집니다.",
     "부산광역시": "부산은 16개 구·군이 각각 사업을 운영하고, 시 단위 사업도 함께 공고됩니다.",
     "대구광역시": "대구는 9개 구·군 단위 사업과 시 단위 사업이 함께 올라옵니다.",
-    "인천광역시": "인천은 구와 군이 함께 있어, 군 지역 사업은 시 단위 사업과 따로 확인해야 합니다.",
-    "광주광역시": "광주는 5개 자치구가 사업을 운영합니다.",
+    "인천광역시": "인천은 2026-07-01 개편으로 제물포구·영종구·서해구·검단구와 미추홀구·연수구·"
+                 "남동구·부평구·계양구, 강화군·옹진군으로 나뉘어 있습니다. 군 지역 사업은 시 "
+                 "단위 사업과 따로 확인해야 합니다.",
+    "전남광주통합특별시": "2026-07-01 광주광역시와 전라남도가 통합한 특별시입니다. 광주 5개 자치구와 "
+                    "전남 22개 시·군이 한 광역단체 안에 있어, 시·군·구 단위 사업의 소관을 "
+                    "확인하는 것이 중요합니다.",
     "대전광역시": "대전은 5개 자치구가 사업을 운영합니다.",
     "울산광역시": "울산은 5개 구·군이 사업을 운영합니다.",
     "세종특별자치시": "세종은 기초자치단체가 없어 시 단위 사업이 중심입니다.",
@@ -383,7 +476,6 @@ SIDO_STRUCTURE: Dict[str, str] = {
     "충청북도": "충북은 청주시가 구 단위로 나뉘어 있어, 청주 안에서도 주소에 따라 사업이 갈립니다.",
     "충청남도": "충남은 시·군 단위 사업과 도 단위 사업이 함께 공고됩니다.",
     "전북특별자치도": "전북은 시·군 단위 사업과 도 단위 사업이 함께 공고됩니다.",
-    "전라남도": "전남은 시·군 단위 사업이 많고, 도 단위 사업도 함께 올라옵니다.",
     "경상북도": "경북은 시·군 단위 사업이 많아 소관기관을 확인하는 것이 중요합니다.",
     "경상남도": "경남은 시·군 단위 사업과 도 단위 사업이 함께 공고됩니다.",
     "제주특별자치도": "제주는 제주시·서귀포시 두 곳으로 나뉘어 있습니다.",
@@ -449,7 +541,7 @@ def sido_for_slug(slug: Optional[str]) -> Optional[str]:
 
 
 def hub_paths() -> List[str]:
-    """사이트맵·llms.txt·카운터가 함께 쓰는 지역 허브 경로(18개)."""
+    """사이트맵·llms.txt·카운터가 함께 쓰는 지역 허브 경로(허브 1 + 시·도 16)."""
     return [REGION_HUB_PATH] + [f"/regions/{slug}" for slug in sido_slugs()]
 
 
@@ -488,7 +580,7 @@ def _is_soon(svc: Any) -> bool:
 
 
 def region_stats(catalog: Any) -> Dict[str, Dict[str, Any]]:
-    """시도별 집계 — 카탈로그를 한 번만 훑어 17개 모두 계산하고 메모에 둔다.
+    """시도별 집계 — 카탈로그를 한 번만 훑어 모든 광역단체(16곳)를 계산하고 메모에 둔다.
 
     `SQLiteCatalog`·`Catalog` 둘 다 `services`·`memo`·`meta` 를 제공하므로 같은 코드로
     동작합니다. 계산 결과는 작은 요약(건수·분야·상위 목록)이라 프로세스 수명 동안 재사용합니다.
@@ -755,20 +847,20 @@ def render_index(catalog: Any) -> str:
         for row in rows
     )
     faq = _index_faq(stats, generated)
-    title = f"17개 시·도별 지원금 총정리 ({_year(catalog)}) | GRNT"
+    title = f"{len(SIDO_SLUGS)}개 시·도별 지원금 총정리 ({_year(catalog)}) | GRNT"
     description = (
-        "서울·경기·인천·부산 등 17개 시·도별로 지금 신청할 수 있는 지자체 지원금과 "
-        "전국 공통 지원금을 공고 수·분야·마감일 기준으로 정리했습니다."
+        f"서울·경기·인천·부산 등 {len(SIDO_SLUGS)}개 시·도별로 지금 신청할 수 있는 지자체 "
+        "지원금과 전국 공통 지원금을 공고 수·분야·마감일 기준으로 정리했습니다."
     )
     body = f"""
 <main>
   <p class="crumb"><a href="/">GRNT</a> · <span>지역별 지원금</span></p>
   <section class="card" style="margin-top:12px">
-    <h2>전국 17개 시·도 지원금 모아보기</h2>
+    <h2>전국 {len(SIDO_SLUGS)}개 시·도 지원금 모아보기</h2>
     <p class="sub">사는 지역을 고르면 그 시·도 소관 공고와 전국 공통 제도를 한 화면에서 볼 수
     있습니다. 건수·분야·마감일은 아래 카탈로그 집계를 그대로 씁니다.</p>
     <div class="stat-grid">
-      <div class="stat"><span>시·도</span><b>17</b></div>
+      <div class="stat"><span>시·도</span><b>{len(SIDO_SLUGS)}</b></div>
       <div class="stat"><span>지자체 공고</span><b>{total_local:,}</b></div>
       <div class="stat"><span>신청 가능</span><b>{total_open:,}</b></div>
       <div class="stat"><span>전국 공통</span><b>{national_open:,}</b></div>

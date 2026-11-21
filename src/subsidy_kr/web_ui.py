@@ -1265,10 +1265,63 @@ PAGE_TEMPLATE = """<!doctype html>
   var activeFilter = 'none';
   var activeKind = 'none';
   var activeField = 'all';
-  var lastData = null;
+  var lastData = null;      // 지금 그린 응답(판정 하나만 받은 것일 수 있다)
+  var fullData = null;      // 판정 필터가 없는 전체 응답
+  var lastPayload = null;   // 같은 조건으로 다시 조회할 때 쓰는 요청 본문
+  var serverVerdict = null; // 서버에서 판정 하나만 골라 받아 왔는지
+  var fetching = false;
+  var VERDICT_LABELS = {{
+    eligible_likely: '받을 가능성 높음',
+    check_needed: '조건 확인 필요',
+    insufficient_info: '정보 부족'
+  }};
+
+  function kindMatches(row, kind){{
+    return kind === 'program' ? row.benefit_kind === 'program' : row.benefit_kind !== 'program';
+  }}
+
+  // 탭 숫자는 results(상한에 잘린 목록)가 아니라 서버가 센 전체 집계를 쓴다.
+  // 예전에는 50건으로 잘린 목록을 세서 할당량(34/16)이 건수처럼 보였다.
+  function verdictTotal(result, kind, code){{
+    var kv = result.kind_verdict_counts;
+    if (!kv) return null;
+    if (kind === 'none') {{
+      var grant = (kv.grant && kv.grant[code]) || 0;
+      var program = (kv.program && kv.program[code]) || 0;
+      return grant + program;
+    }}
+    return (kv[kind] && kv[kind][code]) || 0;
+  }}
+
+  function refetchVerdict(code){{
+    if (!lastPayload || fetching) return;
+    fetching = true;
+    var statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = '판정별로 다시 조회하는 중…';
+    var body = JSON.parse(JSON.stringify(lastPayload));
+    body.verdict = code;
+    body.limit = 200;
+    body.balance_verdicts = false;
+    fetch('/v1/tools/search_subsidies', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify(body)
+    }}).then(function(response){{
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    }}).then(function(data){{
+      if (!data.ok) throw new Error(data.message || data.error || 'error');
+      serverVerdict = code;
+      if (statusEl) statusEl.textContent = '';
+      renderResults(data);
+    }}).catch(function(error){{
+      if (statusEl) statusEl.textContent = '판정별 다시 조회에 실패했습니다(' + error.message + '). 잠시 뒤 다시 시도해 주세요.';
+    }}).finally(function(){{ fetching = false; }});
+  }}
 
   function renderResults(data){{
     lastData = data;
+    if (!serverVerdict && !(data.result && data.result.verdict_filter)) {{ fullData = data; }}
     // 공유 버튼(결과 요약·조건 링크)이 방금 그린 결과를 쓰도록 넘겨 준다.
     if (window.GRNT_SHARE && window.GRNT_SHARE.update) {{
       window.GRNT_SHARE.update(data);
@@ -1286,8 +1339,12 @@ PAGE_TEMPLATE = """<!doctype html>
     document.querySelectorAll('.sub-bar-dyn').forEach(function(elNode){{ elNode.remove(); }});
 
     // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램) 딱 2개만 먼저 노출
-    var grantCnt = allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
-    var progCnt = allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
+    // 숫자는 상한 전 전체 집계(kind_counts) — 반환 목록에서 세지 않는다.
+    var kindTotals = result.kind_counts || null;
+    var grantCnt = kindTotals ? (kindTotals.grant || 0)
+      : allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
+    var progCnt = kindTotals ? (kindTotals.program || 0)
+      : allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
     if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'none'; }}
     if (activeKind === 'program' && progCnt === 0 && grantCnt > 0) {{ activeKind = 'none'; }}
     var kindTabs = [
@@ -1312,88 +1369,129 @@ PAGE_TEMPLATE = """<!doctype html>
           activeFilter = 'none';
           activeField = 'all';
         }}
-        renderResults(lastData);
+        if (serverVerdict) {{
+          // 판정 하나만 받아 온 상태라면 전체 응답으로 돌아가 종류를 다시 센다.
+          serverVerdict = null;
+          renderResults(fullData || lastData);
+        }} else {{
+          renderResults(lastData);
+        }}
       }});
       counts.appendChild(kbtn);
     }});
 
-    // 1단 필터 적용 (미선택 시 전체 목록 표시, 2·3단 필터 바는 숨김)
+    // 2단: 판정별 필터 — 종류를 고르지 않아도 보인다.
+    // '조건 확인 필요'는 이 서비스의 핵심 결과인데, 상한에 걸려 일부만 들어 왔으면
+    // 그 판정만 서버에 다시 물어 전체를 받아 온다(재조회). 숫자는 언제나 전체 집계.
     var kindRows = activeKind === 'none'
       ? allRows
-      : allRows.filter(function(r){{
-          return activeKind === 'program'
-            ? r.benefit_kind === 'program'
-            : r.benefit_kind !== 'program';
-        }});
+      : allRows.filter(function(r){{ return kindMatches(r, activeKind); }});
+
+    var subBox = document.createElement('div');
+    subBox.className = 'sub-bar-dyn sub-bar';
+    var labels = {{
+      all: '전체',
+      eligible_likely: '받을 가능성 높음',
+      check_needed: '조건 확인 필요',
+      insufficient_info: '정보 부족'
+    }};
+    var kindTotal = activeKind === 'none' ? (grantCnt + progCnt) : kindCounts[activeKind];
+    var verdictBar = document.createElement('div');
+    verdictBar.className = 'counts';
+
+    function returnedFor(code){{
+      return allRows.filter(function(r){{
+        return r.verdict && r.verdict.code === code &&
+          (activeKind === 'none' || kindMatches(r, activeKind));
+      }}).length;
+    }}
+
+    function goFullView(){{
+      activeFilter = 'none';
+      activeField = 'all';
+      if (serverVerdict) {{
+        serverVerdict = null;
+        renderResults(fullData || lastData);
+      }} else {{
+        renderResults(lastData);
+      }}
+    }}
+
+    function applyVerdict(code){{
+      activeField = 'all';
+      var total = verdictTotal(result, activeKind, code);
+      var have = returnedFor(code);
+      if (total === null) {{ total = have; }}
+      if (serverVerdict === code) {{ activeFilter = code; renderResults(lastData); return; }}
+      if (lastPayload && (serverVerdict || have < total)) {{
+        activeFilter = code;
+        refetchVerdict(code);
+        return;
+      }}
+      activeFilter = code;
+      renderResults(lastData);
+    }}
+
+    Object.keys(labels).forEach(function(code){{
+      var cnt = code === 'all' ? kindTotal : verdictTotal(result, activeKind, code);
+      if (cnt === null) {{ cnt = code === 'all' ? kindRows.length : returnedFor(code); }}
+      if (code !== 'all' && !cnt) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = activeFilter === code ? 'active' : '';
+      btn.textContent = labels[code] + ' ' + cnt + '건';
+      btn.addEventListener('click', function(){{
+        if (activeFilter === code || code === 'all') {{
+          goFullView();
+          return;
+        }}
+        applyVerdict(code);
+      }});
+      verdictBar.appendChild(btn);
+    }});
+    subBox.appendChild(verdictBar);
 
     var verdictRows = kindRows;
-    if (activeKind !== 'none') {{
-      var subBox = document.createElement('div');
-      subBox.className = 'sub-bar-dyn sub-bar';
-
-      var labels = {{
-        all: '전체',
-        eligible_likely: '받을 가능성 높음',
-        check_needed: '조건 확인 필요',
-        insufficient_info: '정보 부족'
-      }};
-      var rowCounts = {{all: kindRows.length, eligible_likely: 0, check_needed: 0, insufficient_info: 0}};
-      kindRows.forEach(function(r){{
-        var c = r.verdict && r.verdict.code;
-        if (rowCounts[c] !== undefined) {{ rowCounts[c] += 1; }}
+    if (activeFilter !== 'none' && activeFilter !== 'all') {{
+      verdictRows = kindRows.filter(function(r){{
+        return r.verdict && r.verdict.code === activeFilter;
       }});
-      var verdictBar = document.createElement('div');
-      verdictBar.className = 'counts';
-      Object.keys(labels).forEach(function(code){{
-        var cnt = code === 'all' ? kindRows.length : (rowCounts[code] || 0);
-        if (code !== 'all' && !cnt) return;
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = activeFilter === code ? 'active' : '';
-        btn.textContent = labels[code] + ' ' + cnt + '건';
-        btn.addEventListener('click', function(){{
-          activeFilter = (activeFilter === code) ? 'none' : code;
-          activeField = 'all';
-          renderResults(lastData);
-        }});
-        verdictBar.appendChild(btn);
-      }});
-      subBox.appendChild(verdictBar);
-
-      if (activeFilter !== 'none') {{
-        verdictRows = kindRows.filter(function(r){{
-          if (activeFilter === 'all') return true;
-          return r.verdict && r.verdict.code === activeFilter;
-        }});
-      }}
-
-      if (activeFilter !== 'none') {{
-        var fieldCounts = {{}};
-        verdictRows.forEach(function(r){{
-          var b = fieldBucket(r);
-          fieldCounts[b] = (fieldCounts[b] || 0) + 1;
-        }});
-        var fieldBar = document.createElement('div');
-        fieldBar.className = 'counts field-bar';
-        var fAllBtn = document.createElement('button');
-        fAllBtn.type = 'button';
-        fAllBtn.className = activeField === 'all' ? 'active' : '';
-        fAllBtn.textContent = '전체 분야 ' + verdictRows.length + '건';
-        fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
-        fieldBar.appendChild(fAllBtn);
-        fieldOrder.forEach(function(fb){{
-          if (!fieldCounts[fb]) return;
-          var fbBtn = document.createElement('button');
-          fbBtn.type = 'button';
-          fbBtn.className = activeField === fb ? 'active' : '';
-          fbBtn.textContent = fb + ' ' + fieldCounts[fb] + '건';
-          fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
-          fieldBar.appendChild(fbBtn);
-        }});
-        subBox.appendChild(fieldBar);
-      }}
-      counts.parentNode.insertBefore(subBox, counts.nextSibling);
     }}
+
+    if (activeFilter !== 'none') {{
+      var fieldCounts = {{}};
+      verdictRows.forEach(function(r){{
+        var b = fieldBucket(r);
+        fieldCounts[b] = (fieldCounts[b] || 0) + 1;
+      }});
+      var fieldBar = document.createElement('div');
+      fieldBar.className = 'counts field-bar';
+      var fAllBtn = document.createElement('button');
+      fAllBtn.type = 'button';
+      fAllBtn.className = activeField === 'all' ? 'active' : '';
+      fAllBtn.textContent = '전체 분야 ' + verdictRows.length + '건';
+      fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
+      fieldBar.appendChild(fAllBtn);
+      fieldOrder.forEach(function(fb){{
+        if (!fieldCounts[fb]) return;
+        var fbBtn = document.createElement('button');
+        fbBtn.type = 'button';
+        fbBtn.className = activeField === fb ? 'active' : '';
+        fbBtn.textContent = fb + ' ' + fieldCounts[fb] + '건';
+        fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
+        fieldBar.appendChild(fbBtn);
+      }});
+      subBox.appendChild(fieldBar);
+    }}
+
+    if (serverVerdict) {{
+      var backBtn = el('button', 'btn-link', '전체 결과로 돌아가기');
+      backBtn.type = 'button';
+      backBtn.style.marginTop = '8px';
+      backBtn.addEventListener('click', goFullView);
+      subBox.appendChild(backBtn);
+    }}
+    counts.parentNode.insertBefore(subBox, counts.nextSibling);
 
     function fieldBucket(row){{
       var fl = String(row.field_label || row.field || '기타').trim();
@@ -1409,9 +1507,19 @@ PAGE_TEMPLATE = """<!doctype html>
 
     var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
     var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
+    var shownNote = '';
+    if (result.verdict_filter) {{
+      shownNote = ' · ' + (VERDICT_LABELS[result.verdict_filter] || result.verdict_filter) +
+        ' ' + (result.matched_total || 0) + '건';
+      if (result.truncated) {{
+        shownNote += ' 중 상위 ' + (result.returned || 0) + '건';
+      }}
+    }} else if (result.truncated && result.matched_total) {{
+      shownNote = ' · 조건에 맞는 ' + result.matched_total + '건 중 상위 ' + (result.returned || 0) + '건 표시';
+    }}
     document.getElementById('results-sub').textContent =
-      trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다' + hiddenNote + '. ' +
-      '위 탭을 눌러 판정별로 골라 볼 수 있습니다.';
+      trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다' + hiddenNote + shownNote + '. ' +
+      '아래 버튼으로 종류(지원금·프로그램)와 판정을 골라 볼 수 있습니다.';
 
     if (result.keyword_note_ko) {{
       var kwNotice = el('div', 'notice');
@@ -1434,9 +1542,9 @@ PAGE_TEMPLATE = """<!doctype html>
     }});
     if (!rows.length) {{
       box.appendChild(el('div', 'empty',
-        activeFilter === 'all'
+        (activeFilter === 'all' || activeFilter === 'none')
           ? '조건에 맞는 후보가 나오지 않았습니다. 지역·소득구간·상황 또는 사업자 조건을 바꿔 다시 시도해 보세요.'
-          : '선택한 분류에 해당하는 상위 결과가 없습니다. 다른 탭을 누르거나 소득구간·상황 조건을 더 입력해 보세요.'));
+          : '선택한 판정의 결과 중 위 분야에 해당하는 것이 없습니다. 다른 판정이나 분야를 누르거나 조건을 넓혀 보세요.'));
     }}
     function buildCard(row){{
       var wrap = el('div', 'result');
@@ -1800,6 +1908,7 @@ PAGE_TEMPLATE = """<!doctype html>
       profile: buildProfile(),
       limit: 200,
       balance_kinds: true,
+      balance_verdicts: true,
       include_closed: !!(includeClosedEl && includeClosedEl.checked)
     }};
     if (kwEl && kwEl.value.trim()) {{
@@ -1808,6 +1917,9 @@ PAGE_TEMPLATE = """<!doctype html>
     activeFilter = 'none';
     activeKind = 'none';
     activeField = 'all';
+    lastPayload = payload;
+    serverVerdict = null;
+    fullData = null;
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
@@ -1818,6 +1930,7 @@ PAGE_TEMPLATE = """<!doctype html>
     }}).then(function(data){{
       if (!data.ok) {{ throw new Error(data.message || data.error || 'error'); }}
       status.textContent = '';
+      fullData = data;
       renderResults(data);
       document.getElementById('results-card').scrollIntoView({{behavior:'smooth', block:'start'}});
     }}).catch(function(error){{
@@ -1873,6 +1986,59 @@ PAGE_TEMPLATE = """<!doctype html>
 """
 
 
+
+
+def render_not_found(path: str = "/", *, reason: str = "") -> str:
+    """사람용 404 페이지 — 잘못된 주소로 온 사람을 홈·목록으로 돌려보낸다.
+
+    `/v1/` 경로는 기계용이라 서버가 JSON 404 를 그대로 돌려준다(server.py).
+    """
+    from html import escape
+
+    requested = escape(str(path or "/")[:120])
+    reason_line = (
+        f'<p class="meta">분류: {escape(reason)}</p>' if reason else ""
+    )
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>페이지를 찾을 수 없습니다 (404) | GRNT</title>
+<meta name="description" content="요청한 주소의 페이지가 없습니다. GRNT 홈에서 조건으로 지원금을 판정하거나 주제·지역 목록으로 이동하세요.">
+<meta name="robots" content="noindex,follow">
+<meta property="og:title" content="페이지를 찾을 수 없습니다 (404) | GRNT">
+<style>{BASE_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">G</div>
+    <div><h1>GRNT · 개인·창업 지원금 판정기</h1>
+    <p class="en">KOREA GRANT &amp; SUBSIDY INTELLIGENCE</p></div>
+  </div>
+</header>
+<main>
+  <section class="card" style="margin-top:16px">
+    <h2>찾으시는 페이지가 없습니다 (404)</h2>
+    <p class="sub">주소가 바뀌었거나 오타일 수 있습니다. 아래에서 바로 이동하세요.</p>
+    <p class="meta">요청 경로: <code>{requested}</code></p>
+    {reason_line}
+    <div class="links">
+      <a class="pill" href="/">내 조건으로 지원금 찾기</a>
+      <a class="pill ghost" href="/s/">주제별 지원금</a>
+      <a class="pill ghost" href="/regions/">시·도별 지원금</a>
+      <a class="pill ghost" href="/guides/">자주 묻는 질문</a>
+    </div>
+  </section>
+</main>
+<p class="foot">공개 데이터 기반 사전 점검입니다. 최종 수급·선정 여부는 소관기관 심사로 결정됩니다.</p>
+</div>
+</body>
+</html>
+"""
 
 
 def region_payload() -> Dict[str, Any]:

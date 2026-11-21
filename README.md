@@ -16,7 +16,7 @@
 - 사전 신청·문의: `POST /v1/inquiry` — 홈 화면 푸터 위 미니 카드(세무·노무사 리포트·대량 매칭 문의)가 보내는 창구. 연락처는 회신 목적으로만 저장하고 통계에는 넣지 않습니다
 - MCP: `POST /mcp` · `POST /v1/mcp` (Streamable HTTP JSON-RPC 2.0) + `python -m subsidy_kr.mcp_stdio`
 - 정적 SEO: `GET /s/` · `GET /s/{slug}` (개인 주제 + 창업·R&D 주제 + 지역), `/robots.txt`, `/llms.txt`, `/sitemap.xml`
-- 시·도 허브: `GET /regions/` · `GET /regions/{slug}` — 17개 시·도별 공고 수·분야 분포·마감 임박 목록·시·군·구별 공고 수(FAQPage·BreadcrumbList·WebPage JSON-LD)
+- 시·도 허브: `GET /regions/` · `GET /regions/{slug}` — 16개 시·도별 공고 수·분야 분포·마감 임박 목록·시·군·구별 공고 수(FAQPage·BreadcrumbList·WebPage JSON-LD)
 - 질문형 가이드: `GET /guides/` · `GET /guides/{slug}` — AI·검색에 묻는 질문 61개(FAQPage JSON-LD)
 - 검색 동의어: `keyword` 검색은 **생활어 사전**(`synonyms.py`)으로 단어를 넓혀 봅니다 — "전기세"→전기요금·가스요금, "병원비"→의료비·진료비, "배달비"→택배비·배달앱. 질의어를 그대로 담은 제도가 항상 먼저 나옵니다
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
@@ -294,9 +294,9 @@ CSV로 정리합니다. `POST /v1/batch-match`, `batch_match_clients` 툴, 웹 U
 
 - 지역 판별은 `regions.parse_agency_region` 이 소관기관명으로만 합니다. `중구`·`서구`처럼 여러
   시도에 있는 이름은 임의로 찍지 않고 **확인 필요**로 남깁니다(틀린 지역으로 거르는 것보다 낫습니다).
-- 집계는 카탈로그를 한 번만 훑어 17개를 모두 만들고 `catalog.memo` 에 두므로, 두 번째 요청부터는
+- 집계는 카탈로그를 한 번만 훑어 16개를 모두 만들고 `catalog.memo` 에 두므로, 두 번째 요청부터는
   즉시 응답합니다(`SQLiteCatalog`·`Catalog` 공통).
-- `/v1/meta` 의 `regions` 키에 17개 슬러그·URL 이 들어 있어 에이전트도 지역 페이지를 바로 찾습니다.
+- `/v1/meta` 의 `regions` 키에 16개 슬러그·URL 이 들어 있어 에이전트도 지역 페이지를 바로 찾습니다.
 
 ---
 
@@ -361,6 +361,28 @@ sqlite3 data/app.sqlite "select id, day, topic, contact, message from inquiries 
 
 `search_subsidies` 응답에는 확장이 일어난 경우 `keyword_note_ko`(예: "동의어 확장: 병원비→의료비·진료비")가
 붙습니다. 넓힌 결과는 질의어 일치 → 관련도 → 판정 순으로 줄을 세우므로, 원래 결과가 밀려나지 않습니다.
+
+---
+
+## 3-7. 행정개편·결과 상한 정리 (0.4.2)
+
+라이브 전수검수에서 드러난 P0/P1 결함을 고친 버전입니다.
+
+| 항목 | 0.4.1 | 0.4.2 |
+|---|---|---|
+| 결과 상한 | `search_subsidies` 가 서버에서 **50건으로 캡** | 최대 **200건** (웹 UI·API 동일) |
+| 1단 탭 숫자 | 반환 목록(50건)을 세서 34/16 처럼 **할당량이 건수로 노출** | `kind_counts` — 상한 전 전체 집계 |
+| 판정 진입 | '조건 확인 필요'가 50건 캡에 밀려 1~2건만 노출, 창업 트랙은 2단 필터 자체가 사라짐 | 판정별 전체 건수를 먼저 보여 주고, 목록에 없는 건수면 `verdict` 로 **서버 재조회**(예: 확인 필요 253건 전체) |
+| 시·도 | 17개(개편 전) | **16개** — 2026-07-01 전남광주통합특별시 출범 |
+| 인천 시·군·구 | 중구·동구·서해구 (개편 전) | 제물포구·영종구·서해구·**검단구** (+ 미추홀·연수·남동·부평·계양·강화·옹진) |
+| 이전 주소 | — | `/regions/gwangju`·`/s/jeonnam` 등은 새 통합 페이지로 **301** |
+| '전국' 오분류 | 천안복지재단·전주시복지재단·안산인재육성재단 등 109건이 전국으로 내려와 타지역 검색에 혼입 | 기관명의 시·군·구·시도·재단명으로 지역을 추론(막히면 `local_unresolved`), 전국은 진짜 전국 제도만 |
+| `/s/` 브랜드 | `<title>` 이 `\| SUBSIDY-KR` | `\| GRNT` |
+| 전송 크기 | 50건 그대로(~250KB)·압축 없음 | 200건을 **gzip** 으로 (~900KB→~76KB, HTML ~105KB→~28KB) |
+| 404 | non-`/v1/` 도 raw JSON | 사람용 HTML 404(홈·주제·지역·가이드 링크) |
+
+지역 택소노미에는 버전(`regions.SCHEMA_VERSION`)이 붙었습니다. 개편 전에 만든 `catalog.sqlite`
+(지역 컬럼)는 로더가 자동으로 다시 만듭니다 — 그대로 두면 sido 로 거르는 SQL 이 새 지역 사용자를 놓칩니다.
 
 ---
 
@@ -583,7 +605,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.1` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.2` 태그로 게시합니다.
 
 ## 9. 라이선스
 

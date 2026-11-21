@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import sys
@@ -46,7 +47,7 @@ from .api import batch_export, call_tool, mcp_manifest, report_export, submit_in
 from .catalog import Catalog, data_dir_from_env, load_catalog
 from .store import Store
 from .version import __version__
-from .web_ui import render_page
+from .web_ui import render_not_found, render_page
 
 MAX_BODY = 64 * 1024
 MAX_BATCH_BODY = 512 * 1024
@@ -160,42 +161,61 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
             for key, value in CORS_HEADERS.items():
                 self.send_header(key, value)
 
-        def _send_json(self, status: int, payload: Any, cache: str = "no-store") -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", cache)
-            self._common_headers()
-            self.end_headers()
-            self.wfile.write(body)
+        def _send_bytes(self, status: int, body: bytes, content_type: str,
+                        cache: str, *, compressible: bool = True) -> None:
+            """공통 응답 쓰기 — 브라우저가 gzip 을 받으면 1KB 이상 본문을 압축한다.
 
-        def _send_text(self, status: int, text: str, content_type: str,
-                       cache: str = "public, max-age=3600") -> None:
-            body = text.encode("utf-8")
+            판정 결과 200건(~900KB)을 그대로 보내면 모바일에서 느리다. 압축하면 ~76KB 다.
+            urllib 같은 클라이언트는 `Accept-Encoding: identity` 라 예전과 같은 본문을 받는다.
+            """
+            encoded = False
+            accepts = str(self.headers.get("Accept-Encoding") or "").lower()
+            if compressible and len(body) >= 1024 and "gzip" in accepts:
+                body = gzip.compress(body, compresslevel=6)
+                encoded = True
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", cache)
+            if encoded:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self._common_headers()
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_json(self, status: int, payload: Any, cache: str = "no-store") -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self._send_bytes(status, body, "application/json; charset=utf-8", cache)
+
+        def _send_text(self, status: int, text: str, content_type: str,
+                       cache: str = "public, max-age=3600") -> None:
+            self._send_bytes(status, text.encode("utf-8"), content_type, cache)
+
         def _send_html(self, status: int, html: str, cache: str = "no-cache") -> None:
-            body = html.encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", cache)
-            self._common_headers()
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_bytes(status, html.encode("utf-8"), "text/html; charset=utf-8", cache)
 
         def _send_empty(self, status: int) -> None:
             self.send_response(status)
             self.send_header("Content-Length", "0")
             self._common_headers()
             self.end_headers()
+
+        def _send_redirect(self, location: str, status: int = 301) -> None:
+            self.send_response(status)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self._common_headers()
+            self.end_headers()
+
+        def _send_not_found(self, reason: str = "") -> None:
+            """사람이 잘못 들어온 주소는 HTML 안내로, `/v1/` 기계 경로는 JSON 404 로 답한다."""
+            path = urlparse(self.path).path
+            if path == "/v1" or path.startswith("/v1/"):
+                self._send_json(404, {"ok": False, "error": "not_found"})
+                return
+            self._send_html(404, render_not_found(path, reason=reason), cache="no-store")
 
         def log_message(self, fmt: str, *args: Any) -> None:  # 조용한 로그
             return
@@ -251,10 +271,13 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     self._send_html(200, pseo.render_index(catalog), cache="public, max-age=600")
                 elif path.startswith("/s/"):
                     slug = path[len("/s/"):].strip("/")
+                    if slug in regions.LEGACY_SIDO_SLUGS:
+                        # 2026-07-01 통합 전 슬러그 — 색인된 주소를 새 주제 페이지로 돌린다.
+                        self._send_redirect(f"/s/{regions.LEGACY_SIDO_SLUGS[slug]}")
+                        return
                     page = pseo.render_item(slug, catalog)
                     if page is None:
-                        self._send_json(404, {"ok": False, "error": "not_found",
-                                              "message": "unknown_page"})
+                        self._send_not_found("unknown_page")
                     else:
                         self._send_html(200, page, cache="public, max-age=600")
                 elif path in ("/guides", "/guides/"):
@@ -264,8 +287,7 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     slug = path[len("/guides/"):].strip("/")
                     page = guides.render_item(slug, catalog)
                     if page is None:
-                        self._send_json(404, {"ok": False, "error": "not_found",
-                                              "message": "unknown_guide"})
+                        self._send_not_found("unknown_guide")
                     else:
                         self._send_html(200, page, cache="public, max-age=600")
                 elif path in ("/regions", "/regions/"):
@@ -273,10 +295,13 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                                     cache="public, max-age=600")
                 elif path.startswith("/regions/"):
                     slug = path[len("/regions/"):].strip("/")
+                    if slug in regions.LEGACY_SIDO_SLUGS:
+                        # 2026-07-01 통합 전 슬러그(gwangju·jeonnam) — 색인된 주소를 살린다.
+                        self._send_redirect(f"/regions/{regions.LEGACY_SIDO_SLUGS[slug]}")
+                        return
                     page = regions.render_item(slug, catalog)
                     if page is None:
-                        self._send_json(404, {"ok": False, "error": "not_found",
-                                              "message": "unknown_region"})
+                        self._send_not_found("unknown_region")
                     else:
                         self._send_html(200, page, cache="public, max-age=600")
                 elif path == "/favicon.ico":
@@ -340,7 +365,7 @@ def make_handler(catalog: Catalog, store: Optional[Store] = None):
                     self._common_headers()
                     self.end_headers()
                 else:
-                    self._send_json(404, {"ok": False, "error": "not_found"})
+                    self._send_not_found("unknown_path")
             except Exception:  # noqa: BLE001 - 내부 정보를 노출하지 않는다
                 self._send_json(500, {"ok": False, "error": "internal_error"})
 
