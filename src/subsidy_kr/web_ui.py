@@ -30,7 +30,7 @@ BASE_CSS = """
   --brand:#1c5bd8; --brand-soft:#e8effc; --brand-ink:#12327a;
   --ok:#0d7a4a; --ok-soft:#e2f5ea; --warn:#8a5300; --warn-soft:#fdf0d8;
   --info:#1e5d91; --info-soft:#e6f0f9; --danger:#9c2b26; --danger-soft:#fbe9e7;
-  --radius:14px;
+  --radius:16px;
 }
 @media (prefers-color-scheme: dark){
   :root{--bg:#0d1117; --card:#161b22; --ink:#e9eef6; --ink-soft:#a9b3c3; --line:#293240;
@@ -42,113 +42,157 @@ BASE_CSS = """
 *{box-sizing:border-box}
 [hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.55;
+body{margin:0;background:var(--bg);color:var(--ink);font-size:16.5px;line-height:1.65;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
-a{color:var(--brand);text-underline-offset:2px}
-.wrap{max-width:940px;margin:0 auto;padding:0 16px 72px}
-header.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
-  padding:22px 0 16px;border-bottom:1px solid var(--line)}
-.brand{display:flex;gap:12px;align-items:center;min-width:0}
-.mark{width:40px;height:40px;border-radius:12px;background:var(--brand);color:var(--on-brand);display:flex;
-  align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:0 0 auto}
-.brand h1{margin:0;font-size:18px;letter-spacing:-.2px}
-.brand p{margin:2px 0 0;font-size:12.5px;color:var(--ink-soft)}
-.brand p.en{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase}
-.pill{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;
-  background:var(--brand-soft);color:var(--brand-ink);white-space:nowrap}
-.pill.ghost{background:transparent;color:var(--ink-soft);border:1px solid var(--line)}
-.notice{margin:16px 0 0;padding:11px 14px;border-radius:11px;background:var(--warn-soft);
-  color:var(--warn);font-size:13px;border:1px solid transparent}
+a{color:var(--brand);text-underline-offset:3px}
+.wrap{max-width:720px;margin:0 auto;padding:0 18px 64px}
+/* 머리글 — 마크·이름 한 줄만. 배지·버전·설명은 푸터로 내렸다. */
+header.top{display:flex;align-items:center;gap:10px;padding:18px 0 6px}
+.mark{width:30px;height:30px;border-radius:9px;background:var(--brand);color:var(--on-brand);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex:0 0 auto}
+.brand-name{font-size:16px;font-weight:800;letter-spacing:.01em}
+.hero{padding:16px 0 24px}
+.hero h1{margin:0;font-size:27px;line-height:1.32;letter-spacing:-.7px;font-weight:800;
+  overflow-wrap:break-word}
+.hero p{margin:10px 0 0;font-size:15.5px;color:var(--ink-soft);line-height:1.6}
+@media (max-width:520px){.hero h1{font-size:25px}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-  padding:20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-.card+.card{margin-top:14px}
-h2{font-size:17px;margin:0 0 6px;letter-spacing:-.2px}
-h3{font-size:14.5px;margin:0 0 8px}
-.sub{margin:0 0 16px;color:var(--ink-soft);font-size:13px}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-.grid .full{grid-column:1/-1}
-@media (max-width:680px){.grid{grid-template-columns:1fr}}
-.field{display:block}
-.field>.lab{display:block;font-size:13px;font-weight:700;margin-bottom:5px}
-.field>.lab .opt{font-weight:500;color:var(--ink-soft);font-size:11.5px;margin-left:4px}
-input[type=text],input[type=number],select{width:100%;font:inherit;font-size:15px;color:var(--ink);
-  background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;appearance:none}
-select{cursor:pointer}
+  padding:22px 20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.card+.card{margin-top:16px}
+.card h2{font-size:17.5px;margin:0 0 8px;letter-spacing:-.2px}
+.sub{margin:0 0 14px;color:var(--ink-soft);font-size:14px;line-height:1.65}
+.sub:last-child{margin-bottom:0}
+/* 대상 선택 — 두 개만 */
+.track{display:flex;gap:8px;margin:0 0 18px}
+.track label{position:relative;flex:1 1 0;min-width:0}
+.track input{position:absolute;opacity:0;width:1px;height:1px}
+.track span{display:block;text-align:center;cursor:pointer;padding:14px 8px;border-radius:12px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink-soft);
+  font-weight:800;font-size:15.5px}
+.track input:checked+span{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.track input:focus-visible+span{outline:2px solid var(--brand);outline-offset:2px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media (max-width:520px){.row2{grid-template-columns:1fr}}
+.field{display:block;margin:0 0 14px}
+.lab{display:block;font-size:13.5px;font-weight:700;margin-bottom:6px}
+.lab .opt{font-weight:500;color:var(--ink-soft);font-size:12.5px;margin-left:4px}
+input[type=text],input[type=number],select{width:100%;font:inherit;font-size:16px;color:var(--ink);
+  background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:13px 14px}
+/* 선택 상자는 플랫폼 기본 화살표를 그대로 둔다 — 모바일에서 '누를 수 있다'는 표시가 된다. */
+select{cursor:pointer;padding-right:10px}
+input[type=text].big{font-size:17px;padding:15px 15px}
 input:focus,select:focus{outline:2px solid var(--brand);outline-offset:1px;border-color:transparent}
-.hint{display:block;margin-top:5px;font-size:11.5px;color:var(--ink-soft)}
+button.primary{font:inherit;font-size:16.5px;font-weight:800;color:var(--on-brand);background:var(--brand);
+  border:0;border-radius:14px;padding:16px 22px;cursor:pointer;min-height:56px}
+button.primary.big{width:100%;display:block;font-size:17.5px;margin-top:4px}
+button.primary:disabled{opacity:.6;cursor:progress}
+button.ghost{font:inherit;font-size:14.5px;font-weight:700;color:var(--ink);background:var(--card);
+  border:1px solid var(--line);border-radius:11px;padding:12px 18px;cursor:pointer;min-height:44px}
+button.ghost:hover{border-color:var(--brand);color:var(--brand-ink)}
+.examples{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:16px;
+  padding-top:14px;border-top:1px dashed var(--line)}
+.examples>span{font-size:12.5px;color:var(--ink-soft)}
+.examples button{font:inherit;font-size:13.5px;font-weight:700;padding:8px 13px;border-radius:999px;
+  background:var(--brand-soft);border:1px solid transparent;color:var(--brand-ink);cursor:pointer}
+.examples button:hover{border-color:var(--brand)}
+/* 세부 조건 — 기본은 접힘 */
+details{border-radius:12px}
+details.more-conditions{margin-top:16px;background:var(--surface-2);border:1px solid var(--line);
+  padding:13px 14px}
+details.more-conditions summary{cursor:pointer;font-weight:800;font-size:14.5px;color:var(--ink)}
+details.more-conditions summary span{font-weight:500;color:var(--ink-soft);font-size:12.5px;margin-left:6px}
+details.more-conditions .grid{margin-top:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.grid .full{grid-column:1/-1}
+@media (max-width:520px){.grid{grid-template-columns:1fr}}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
-.seg label{position:relative;flex:1 1 0;min-width:76px}
+.seg label{position:relative;flex:1 1 0;min-width:88px}
 .seg input{position:absolute;opacity:0;width:1px;height:1px}
-.seg span{display:block;text-align:center;cursor:pointer;font-size:13.5px;font-weight:700;
-  padding:10px 6px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink-soft)}
+.seg span{display:block;text-align:center;cursor:pointer;font-size:14px;font-weight:700;
+  padding:10px 6px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink-soft)}
 .seg input:checked+span{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-ink)}
 .seg input:focus-visible+span{outline:2px solid var(--brand);outline-offset:2px}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chips label{position:relative}
 .chips input{position:absolute;opacity:0;width:1px;height:1px}
-.chips span{display:inline-block;cursor:pointer;font-size:13px;font-weight:600;padding:9px 12px;
-  border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--ink-soft)}
+.chips span{display:inline-block;cursor:pointer;font-size:13.5px;font-weight:600;padding:9px 13px;
+  border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--ink-soft)}
 .chips input:checked+span{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-ink)}
 .chips input:focus-visible+span{outline:2px solid var(--brand);outline-offset:2px}
-.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}
-button.primary{font:inherit;font-size:15.5px;font-weight:800;color:var(--on-brand);background:var(--brand);
-  border:0;border-radius:12px;padding:14px 24px;cursor:pointer;min-height:48px}
-button.primary:disabled{opacity:.6;cursor:progress}
-button.ghost{font:inherit;font-size:14px;font-weight:600;color:var(--ink-soft);background:transparent;
-  border:1px solid var(--line);border-radius:11px;padding:12px 16px;cursor:pointer;min-height:44px}
-.status{margin-top:14px;font-size:13.5px;color:var(--ink-soft);min-height:20px}
-.empty{padding:26px 6px;text-align:center;color:var(--ink-soft);font-size:14px}
-.result{border:1px solid var(--line);border-radius:12px;padding:15px 16px;background:var(--card)}
+.check-line{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);
+  margin-top:6px;cursor:pointer}
+.hint{display:block;margin-top:6px;font-size:12.5px;color:var(--ink-soft);line-height:1.55}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px}
+.status{margin-top:12px;font-size:14px;color:var(--ink-soft)}
+.status:empty{display:none}
+.alt-track{margin:16px 0 0;font-size:13.5px;color:var(--ink-soft)}
+.alt-track label{display:inline-flex;align-items:center;cursor:pointer}
+.alt-track input{margin:0 7px 0 0}
+.alt-track span{text-decoration:underline}
+/* 결과 — 위에 요약 한 칸, 아래에 카드 */
+.summary{padding:20px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line)}
+.sum-main{margin:0;font-size:16px;color:var(--ink-soft);font-weight:700}
+.sum-main b{font-size:30px;color:var(--ink);font-weight:800;letter-spacing:-.8px;margin:0 3px}
+.sum-sub{margin:6px 0 0;font-size:14px;color:var(--ink-soft)}
+.sum-sub b{color:var(--ok);font-weight:800}
+.counts{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 2px}
+.counts button{font:inherit;font-size:13.5px;font-weight:700;padding:8px 13px;border-radius:999px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer}
+.counts button.active{background:var(--ink);border-color:var(--ink);color:var(--card)}
+.counts button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.share-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 6px}
+.share-bar button{font:inherit;font-size:13px;font-weight:700;padding:8px 12px;border-radius:10px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink);cursor:pointer;min-height:40px}
+.share-bar button:hover{border-color:var(--brand);color:var(--brand-ink)}
+.share-flash{font-size:12.5px;font-weight:700;color:var(--ok)}
+.share-flash.is-error{color:var(--danger)}
+.result{border:1px solid var(--line);border-radius:14px;padding:18px 18px 12px;background:var(--card)}
 .result+.result{margin-top:10px}
-.result-head{display:flex;gap:10px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
-.result h4{margin:0;font-size:15.5px;letter-spacing:-.2px}
-.badge{font-size:11.5px;font-weight:800;padding:4px 9px;border-radius:999px;white-space:nowrap}
+.result-top{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+.result h3{margin:0;font-size:17px;line-height:1.42;letter-spacing:-.2px;font-weight:800;flex:1;
+  min-width:0;overflow-wrap:break-word}
+.badge{font-size:12px;font-weight:800;padding:5px 10px;border-radius:999px;white-space:nowrap;margin-top:2px}
 .badge.eligible_likely{background:var(--ok-soft);color:var(--ok)}
 .badge.check_needed{background:var(--warn-soft);color:var(--warn)}
 .badge.insufficient_info{background:var(--info-soft);color:var(--info)}
 .badge.ineligible{background:var(--danger-soft);color:var(--danger)}
-.meta{margin:6px 0 0;font-size:12.5px;color:var(--ink-soft)}
-.amount{margin:10px 0 0;font-size:13.5px;font-weight:500;line-height:1.5;color:var(--ink);
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.amount.expanded{display:block;-webkit-line-clamp:unset;overflow:visible}
-.more-btn{margin-top:4px;padding:0;border:0;background:none;color:var(--brand);font:inherit;
-  font-size:12.5px;font-weight:700;cursor:pointer}
-.card-links{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
-.card-links a.btn-link{font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:8px;
-  background:var(--brand-soft);color:var(--brand-ink);text-decoration:none}
-.card-links a.btn-link:hover{text-decoration:underline}
-.deadline-pill{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:999px;
-  background:var(--bg);color:var(--ink-soft);border:1px solid var(--line)}
-.deadline-pill.soon{background:var(--warn-soft);color:var(--warn);border-color:transparent}
-.kw-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.kw-chips button{font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border-radius:999px;
-  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer}
-.kw-chips button:hover{border-color:var(--brand);color:var(--brand-ink)}
-.why{margin:10px 0 0;font-size:13px;color:var(--ink-soft)}
-.why ul{margin:4px 0 0;padding-left:18px}
-.ask{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:var(--info-soft);color:var(--info);font-size:13px}
-.ask ul{margin:4px 0 0;padding-left:18px}
-details{margin-top:10px;font-size:13px;color:var(--ink-soft)}
-details summary{cursor:pointer;font-weight:700;color:var(--brand-ink)}
-details p{margin:6px 0 0}
-.links{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:13px}
-.foot{margin-top:22px;font-size:12px;color:var(--ink-soft);line-height:1.7}
+.amount{margin:12px 0 0;font-size:15px;line-height:1.6;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.meta{margin:8px 0 0;font-size:13.5px;color:var(--ink-soft)}
+.meta b{color:var(--warn);font-weight:800}
+.cta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.cta a{font-size:14px;font-weight:800;padding:10px 16px;border-radius:10px;text-decoration:none;
+  background:var(--brand);color:var(--on-brand)}
+.cta a.ghost{background:var(--card);color:var(--brand-ink);border:1px solid var(--line)}
+details.more{margin-top:12px;font-size:14px;color:var(--ink-soft)}
+details.more summary{cursor:pointer;font-weight:700;color:var(--brand-ink);font-size:13.5px}
+details.more p{margin:8px 0 0}
+details.more ul{margin:6px 0 0;padding-left:18px}
+details.more li{margin:4px 0}
+.why{margin-top:10px}
+.ask{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--info-soft);
+  color:var(--info);font-size:13.5px}
+.origin{font-size:12.5px;color:var(--ink-soft);margin-top:8px}
+.empty{padding:28px 8px;text-align:center;color:var(--ink-soft);font-size:14.5px;line-height:1.7}
+.more-row{margin-top:14px}
+.more-row button{width:100%}
+/* 접어 둔 보조 블록(일괄 매칭·가이드) */
+details.block{margin:0}
+details.block>summary{cursor:pointer;font-weight:800;font-size:16px;color:var(--ink);
+  list-style-position:outside}
+details.block>summary h2{display:inline;font-size:16px}
+.block-body{padding-top:14px}
+.links{display:flex;gap:10px 16px;flex-wrap:wrap;font-size:14px;margin-top:6px}
+.notice{margin:0 0 4px;padding:12px 14px;border-radius:12px;background:var(--warn-soft);
+  color:var(--warn);font-size:13.5px;line-height:1.6}
+.foot{margin-top:22px;font-size:12.5px;color:var(--ink-soft);line-height:1.8}
 .foot a{color:var(--ink-soft)}
-.counts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
-.counts button{font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;
-  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);cursor:pointer;font-family:inherit}
-.counts button.active{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
-.track{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
-.track label{position:relative;flex:1 1 200px}
-.track input{position:absolute;opacity:0;width:1px;height:1px}
-.track span{display:block;cursor:pointer;padding:13px 14px;border:1px solid var(--line);
-  border-radius:12px;background:var(--bg);color:var(--ink-soft);font-weight:700;font-size:14px}
-.track span small{display:block;font-weight:500;font-size:11.5px;margin-top:2px}
-.track input:checked+span{background:var(--brand-soft);border-color:var(--brand);color:var(--brand-ink)}
-.track input:focus-visible+span{outline:2px solid var(--brand);outline-offset:2px}
-.tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;
-  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);margin-left:6px}
-.origin{font-size:11.5px;color:var(--ink-soft);margin-top:8px}
+.data-note{margin:20px 0 0;font-size:12.5px;color:var(--ink-soft)}
+.privacy-more{margin-top:10px;font-size:12.5px;color:var(--ink-soft)}
+.privacy-more summary{cursor:pointer;font-weight:700;color:var(--ink-soft)}
+.privacy-more p{margin:8px 0 0;line-height:1.75}
+/* 거래처 리포트 표 */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .report-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
 .report-table th,.report-table td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
 .report-table th{background:var(--bg);font-weight:700;white-space:nowrap;font-size:11.5px}
@@ -156,7 +200,7 @@ details p{margin:6px 0 0}
 .report-table td.soon{color:var(--warn);font-weight:800;background:var(--warn-soft)}
 .report-table a{font-weight:700}
 .report-sec{margin-top:18px}
-.report-sec h3{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 4px}
+.report-sec h3{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 4px;font-size:15px}
 .report-sec h3 small{font-weight:500;color:var(--ink-soft);font-size:11.5px}
 .report-actions{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
 .report-actions a,.report-actions button{font:inherit;font-size:13px;font-weight:700;padding:9px 14px;
@@ -166,58 +210,35 @@ details p{margin:6px 0 0}
 .report-sum span{font-size:12.5px;font-weight:700;padding:5px 11px;border-radius:999px;
   background:var(--bg);border:1px solid var(--line);color:var(--ink-soft)}
 .report-size{margin:12px 0 0;padding:11px 13px;border-radius:11px;background:var(--info-soft);color:var(--info);font-size:13px}
+.report-size ul{margin:6px 0 0;padding-left:18px}
+.report-size li{margin:2px 0}
 textarea{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
   line-height:1.6;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;
   padding:11px 12px;resize:vertical;min-height:150px}
 textarea:focus{outline:2px solid var(--brand);outline-offset:1px;border-color:transparent}
 .anon{margin:10px 0 0;padding:10px 13px;border-radius:10px;background:var(--ok-soft);color:var(--ok);
-  font-size:12.5px;line-height:1.6}
+  font-size:12.5px;line-height:1.65}
 .batch-client{margin-top:8px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;
   background:var(--bg);font-size:13px}
 .batch-client summary{cursor:pointer;font-weight:700;color:var(--ink)}
 .batch-client p{margin:5px 0 0;font-size:12.5px;color:var(--ink-soft)}
-.report-size ul{margin:6px 0 0;padding-left:18px}
-.report-size li{margin:2px 0}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;
+  background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);margin-left:6px}
 .guide-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 20px;
-  padding-left:18px;margin:8px 0 0;line-height:1.75;font-size:13.5px}
+  padding-left:18px;margin:8px 0 0;line-height:1.8;font-size:13.5px}
 @media (max-width:680px){.guide-list{grid-template-columns:1fr}}
-.answer{margin:14px 0 0;padding:14px 16px;border-radius:12px;background:var(--brand-soft);
-  color:var(--brand-ink);font-size:15px;font-weight:600;line-height:1.65}
-.answer b{display:block;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--ink-soft);margin-bottom:4px;font-weight:800}
-.checks{margin:8px 0 0;padding-left:20px;line-height:1.85;font-size:14px}
-.checks li{margin:5px 0}
-pre.code{margin:10px 0 0;padding:12px 14px;border-radius:10px;background:var(--bg);
-  border:1px solid var(--line);overflow-x:auto;font-size:12.5px;line-height:1.6;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.crumb{margin:14px 0 0;font-size:12.5px;color:var(--ink-soft)}
-.crumb a{color:var(--ink-soft)}
-/* 판정 결과 — 2·3단 필터와 분야 묶음 머리글. 배경은 항상 토큰으로만 칠한다
-   (다크 모드에서 밝은 회색이 남아 흰 글자가 사라지던 문제 방지). */
-.sub-bar{margin-top:10px;padding:10px 12px;background:var(--surface-2);
-  border:1px solid var(--line);border-radius:10px}
-.sub-bar .counts{margin:0}
-.field-bar{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
-.field-group{margin:14px 0 18px}
-.field-group-hdr{font-size:15px;margin:0 0 8px;padding:6px 10px;border-radius:8px;
-  background:var(--surface-3);color:var(--ink);display:flex;justify-content:space-between;
-  align-items:center}
-.share-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 12px}
-.share-bar button{font:inherit;font-size:13px;font-weight:700;padding:9px 14px;border-radius:10px;
-  border:1px solid var(--line);background:var(--surface-2);color:var(--ink);
-  cursor:pointer;min-height:40px}
-.share-bar button:hover{border-color:var(--brand);color:var(--brand-ink)}
-.share-flash{font-size:12.5px;font-weight:700;color:var(--ok)}
-.share-flash.is-error{color:var(--danger)}
 /* 사전 신청·문의 미니 카드 — 푸터 바로 위. 배경·글자 모두 토큰만 칠한다(다크 모드 대비). */
 .inquiry{margin-top:22px;padding:18px 20px}
-.inquiry h2{font-size:15.5px}
+.inquiry h2{font-size:16px}
 .inquiry .sub{margin-bottom:12px}
 .inquiry .row{display:grid;grid-template-columns:1.15fr 1fr;gap:12px}
 @media (max-width:680px){.inquiry .row{grid-template-columns:1fr}}
 .inquiry textarea{min-height:72px;height:72px;font-family:inherit;font-size:14px;line-height:1.6;
   resize:vertical}
-.inquiry-note{margin:10px 0 0;font-size:11.5px;color:var(--ink-soft);line-height:1.65}
+.inquiry-note{margin:10px 0 0;font-size:11.5px;color:var(--ink-soft);line-height:1.7}
+pre.code{margin:10px 0 0;padding:12px 14px;border-radius:10px;background:var(--bg);
+  border:1px solid var(--line);overflow-x:auto;font-size:12.5px;line-height:1.6;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 """
 
 
@@ -254,19 +275,6 @@ def _income_options() -> str:
         "JA0205": "200% 초과",
     }
     return "".join(f'<option value="{code}">{label}</option>' for code, label in labels.items())
-
-
-def _track_switch() -> str:
-    return (
-        '<div class="track" role="radiogroup" aria-label="지원금 종류 선택">'
-        '<label><input type="radio" name="track" value="personal" checked>'
-        '<span>개인·가구<small>정부·지자체 복지·주거·청년 지원금</small></span></label>'
-        '<label><input type="radio" name="track" value="business">'
-        '<span>창업·소상공인·기업<small>예비창업·업력·소상공인·중소기업 지원사업</small></span></label>'
-        '<label><input type="radio" name="track" value="agent">'
-        '<span>사업자·대리인 리포트<small>세무·노무 담당자용 — 거래처 전달 표(CSV·인쇄)</small></span></label>'
-        '</div>'
-    )
 
 
 def _agent_industry_options() -> str:
@@ -377,36 +385,39 @@ def render_page(catalog_meta: Optional[Dict[str, Any]] = None) -> str:
     personal = int(stats.get("personal") or 0)
     business = int(stats.get("business") or 0)
     generated = str(meta.get("generated_on") or "")[:10]
-    notice = (
-        '<div class="notice" role="status"><strong>지금은 샘플 데이터로 동작합니다.</strong> '
-        "구조·판정 규격은 실제 API와 같지만 금액·기한은 예시값입니다. "
-        "공공데이터포털 15113968·15125364·15157820 승인 후 "
-        "<code>python -m subsidy_kr.sync_gov24 --sources all</code> 을 실행하면 실데이터로 바뀝니다.</div>"
-        if is_sample else
-        f'<div class="notice" role="status" style="background:var(--ok-soft);color:var(--ok)">'
-        f"실데이터 기준일 {generated or '미상'} · 제도 {count:,}건"
-        f"(개인 {personal:,} · 창업·기업 {business:,}) · "
-        "지자체 선정기준 공백은 원본 그대로 두고 &lsquo;확인 필요&rsquo;로 표시합니다.</div>"
-    )
+    # 샘플 데이터일 때만 첫 화면 위에 경고를 띄운다. 실데이터 기준일·건수는 화면을 가리지
+    # 않도록 푸터의 한 줄(data-note)로 내린다.
+    if is_sample:
+        notice = (
+            '<div class="notice" role="status"><strong>지금은 샘플 데이터로 동작합니다.</strong> '
+            "구조·판정 규격은 실제 API와 같지만 금액·기한은 예시값입니다.</div>"
+        )
+        data_note = (
+            "샘플 데이터 — 공공데이터포털 15113968·15125364·15157820 승인 뒤 "
+            "<code>python -m subsidy_kr.sync_gov24 --sources all</code> 을 실행하면 실데이터로 바뀝니다."
+        )
+    else:
+        notice = ""
+        data_note = (
+            f'실데이터 기준일 {generated or "미상"} · 제도 {count:,}건'
+            f"(개인 {personal:,} · 창업·기업 {business:,}) · "
+            '<a href="/v1/meta">데이터 상태</a>'
+        )
     return PAGE_TEMPLATE.format(
         service_name=SERVICE_NAME,
         title=SERVICE_TITLE_KO,
-        tagline=SERVICE_TAGLINE,
-        subtitle_en=SERVICE_SUBTITLE_EN,
         version=__version__,
         css=BASE_CSS,
         sido_options=_sido_options(),
         sigungu_map=_sigungu_map(),
         chips=_situation_chips(),
         income_options=_income_options(),
-        track_switch=_track_switch(),
         entity_options=_entity_options(),
         industry_options=_industry_options(),
         agent_industry_options=_agent_industry_options(),
         interest_checks=_interest_checks(),
         notice=notice,
-        count=count,
-        generated=generated,
+        data_note=data_note,
         guides_footer=guides.footer_html(),
         share_origin=static_files.base_url(),
         share_keys=",".join(SHARE_PARAM_KEYS),
@@ -922,193 +933,198 @@ PAGE_TEMPLATE = """<!doctype html>
 <body>
 <div class="wrap">
   <header class="top">
-    <div class="brand">
-      <div class="mark" aria-hidden="true">G</div>
-      <div>
-        <h1>{service_name} · {title}</h1>
-        <p class="en">{subtitle_en}</p>
-        <p>{tagline} 로그인·주민등록번호 없이 내 조건만 확인합니다.</p>
-      </div>
-    </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <span class="pill">무료</span>
-      <span class="pill ghost">v{version}</span>
-    </div>
+    <div class="mark" aria-hidden="true">G</div>
+    <div class="brand-name">{service_name}</div>
   </header>
   {notice}
 
   <main>
-    <section class="card" style="margin-top:16px">
-      <h2>내 조건 입력</h2>
-      <p class="sub">아는 것만 채우면 됩니다. 비워 둔 항목은 &lsquo;정보 부족&rsquo;으로 정직하게 표시하고,
-      무엇을 더 넣어야 판정되는지 알려 드립니다.</p>
+    <section class="hero">
+      <h1>내 조건에 맞는 정부·지자체 지원금 3초 만에 찾기</h1>
+      <p>지역과 조건 몇 개만 고르면 됩니다. 로그인·주민등록번호 없이 무료.</p>
+    </section>
+
+    <section class="card" id="search-card">
       <form id="check" autocomplete="off">
-        {track_switch}
-        <div class="grid">
+        <div class="track" role="radiogroup" aria-label="대상 선택">
+          <label><input type="radio" name="track" value="personal" checked><span>개인·가구</span></label>
+          <label><input type="radio" name="track" value="business"><span>소상공인·기업</span></label>
+        </div>
+
+        <div class="row2">
           <label class="field">
-            <span class="lab">지역(거주지 / 사업장) <span class="opt">선택</span></span>
+            <span class="lab">지역</span>
             <select id="sido" name="sido">
-              <option value="">선택 안 함</option>
+              <option value="">전국</option>
               {sido_options}
             </select>
           </label>
-          <label class="field">
-            <span class="lab">시·군·구 <span class="opt">선택</span></span>
-            <select id="sigungu" name="sigungu"><option value="">선택 안 함</option></select>
-            <span class="hint">지자체 제도는 시·군·구까지 있어야 정확합니다.</span>
+          <label class="field" id="sigungu-field" hidden>
+            <span class="lab">시·군·구</span>
+            <select id="sigungu" name="sigungu"><option value="">전체</option></select>
           </label>
-          <label class="field">
-            <span class="lab">출생연도</span>
-            <input type="number" id="birth_year" name="birth_year" inputmode="numeric"
-                   min="1900" max="2026" step="1" placeholder="예: 1992">
-            <span class="hint">만 나이는 연도 차이로 계산합니다(생일 전이면 1살 차이).</span>
-          </label>
-          <div class="field">
-            <span class="lab">성별 <span class="opt">성별 제한 사업 판정용</span></span>
-            <div class="seg">
-              <label><input type="radio" name="sex" value="male"><span>남성</span></label>
-              <label><input type="radio" name="sex" value="female"><span>여성</span></label>
+        </div>
+
+        <label class="field">
+          <span class="lab">찾고 싶은 지원금 <span class="opt">선택</span></span>
+          <input type="text" id="keyword" name="keyword" class="big"
+                 placeholder="예: 청년 월세, 출산, 소상공인">
+        </label>
+
+        <button class="primary big" type="submit" id="run">지원금 찾기</button>
+
+        <div class="examples">
+          <span>이렇게 찾아보세요</span>
+          <button type="button" data-kw="청년 월세" data-track="personal">청년 월세</button>
+          <button type="button" data-kw="출산" data-track="personal">출산·육아</button>
+          <button type="button" data-kw="소상공인" data-track="business">소상공인</button>
+        </div>
+
+        <details class="more-conditions" id="more-conditions">
+          <summary>세부 조건 더 고르기 <span id="more-extra">나이·소득·상황</span></summary>
+          <div class="grid" id="personal-fields">
+            <label class="field">
+              <span class="lab">출생연도</span>
+              <input type="number" id="birth_year" name="birth_year" inputmode="numeric"
+                     min="1900" max="2026" step="1" placeholder="예: 1992">
+            </label>
+            <div class="field">
+              <span class="lab">성별 <span class="opt">성별 제한 사업용</span></span>
+              <div class="seg">
+                <label><input type="radio" name="sex" value="male"><span>남성</span></label>
+                <label><input type="radio" name="sex" value="female"><span>여성</span></label>
+              </div>
             </div>
+            <label class="field">
+              <span class="lab">가구원 수</span>
+              <select id="household_size" name="household_size">
+                <option value="">선택 안 함</option>
+                <option>1</option><option>2</option><option>3</option><option>4</option>
+                <option>5</option><option>6</option><option>7</option><option>8</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="lab">가구 소득</span>
+              <select id="income_band" name="income_band">
+                <option value="">모르겠음</option>
+                {income_options}
+              </select>
+            </label>
+            <div class="field full">
+              <span class="lab">해당하는 상황 <span class="opt">복수 선택</span></span>
+              <div class="chips" id="chips">{chips}</div>
+            </div>
+            <label class="field full">
+              <span class="lab">자녀 출생연도 <span class="opt">아동 대상 제도용</span></span>
+              <input type="text" id="children_years" name="children_years"
+                     placeholder="예: 2024, 2026">
+            </label>
           </div>
-        </div>
-
-        <div class="grid" id="personal-fields">
-          <label class="field">
-            <span class="lab">가구원 수 <span class="opt">선택</span></span>
-            <select id="household_size" name="household_size">
-              <option value="">선택 안 함</option>
-              <option>1</option><option>2</option><option>3</option><option>4</option>
-              <option>5</option><option>6</option><option>7</option><option>8</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="lab">가구 소득 (기준 중위소득)</span>
-            <select id="income_band" name="income_band">
-              <option value="">모르겠음 / 선택 안 함</option>
-              {income_options}
-            </select>
-            <span class="hint">소득구간 조건이 있는 제도만 이 값으로 판정합니다.</span>
-          </label>
-          <div class="field full">
-            <span class="lab">해당하는 상황 <span class="opt">복수 선택</span></span>
-            <div class="chips" id="chips">{chips}</div>
-            <span class="hint">아무것도 고르지 않으면 &lsquo;해당 없음&rsquo;으로 판정합니다. 모르면 입력하지 말고
-            아래 버튼만 눌러도 됩니다(그때는 &lsquo;정보 부족&rsquo;으로 답합니다).</span>
+          <div class="grid" id="biz-fields" hidden>
+            <label class="field">
+              <span class="lab">창업 상태</span>
+              <select id="biz_status" name="biz_status">
+                <option value="">선택 안 함</option>
+                <option value="pre">예비창업자(사업자등록 전)</option>
+                <option value="operating">사업자등록 후 운영 중</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="lab">업력 <span class="opt">년</span></span>
+              <input type="number" id="biz_years" name="biz_years" inputmode="numeric"
+                     min="0" max="60" step="1" placeholder="예: 2">
+            </label>
+            <label class="field">
+              <span class="lab">기업 규모·형태</span>
+              <select id="biz_entity" name="biz_entity">
+                <option value="">선택 안 함</option>
+                {entity_options}
+              </select>
+            </label>
+            <label class="field">
+              <span class="lab">업종</span>
+              <select id="biz_industry" name="biz_industry">
+                <option value="">선택 안 함</option>
+                {industry_options}
+              </select>
+            </label>
           </div>
-          <label class="field full">
-            <span class="lab">자녀 출생연도 <span class="opt">선택 · 아동 대상 제도용</span></span>
-            <input type="text" id="children_years" name="children_years"
-                   placeholder="예: 2024, 2026 (쉼표로 구분)">
+          <label class="check-line">
+            <input type="checkbox" id="include_closed"> 지난(마감) 공고도 함께 보기
           </label>
-        </div>
+        </details>
 
-        <div class="grid" id="agent-fields" hidden>
-          <label class="field">
-            <span class="lab">업종</span>
-            <select id="agent_industry">
-              <option value="">선택 안 함</option>
-              {agent_industry_options}
-            </select>
-            <span class="hint">업종에 따라 적용되는 근로자·매출 기준이 달라집니다.</span>
-          </label>
-          <label class="field">
-            <span class="lab">상시근로자 수</span>
-            <input type="number" id="agent_employees" inputmode="numeric" min="0" max="100000"
-                   step="1" placeholder="예: 3">
-            <span class="hint">대표자 제외 · 월 60시간 미만 제외 · 60시간 이상 단시간은 0.5명</span>
-          </label>
-          <label class="field">
-            <span class="lab">연매출 <span class="opt">억 원</span></span>
-            <input type="number" id="agent_revenue_eok" inputmode="decimal" min="0" step="0.1"
-                   placeholder="예: 2">
-            <span class="hint">직전 사업연도 매출. 모르면 비워 두세요.</span>
-          </label>
-          <label class="field">
-            <span class="lab">업력 <span class="opt">년</span></span>
-            <input type="number" id="agent_years" inputmode="numeric" min="0" max="60"
-                   step="1" placeholder="예: 4">
-          </label>
-          <label class="field">
-            <span class="lab">기업 형태</span>
-            <select id="agent_entity">
-              <option value="">자동(규모 추정으로 결정)</option>
-              {entity_options}
-            </select>
-          </label>
-          <label class="field">
-            <span class="lab">사업자 상태</span>
-            <select id="agent_status">
-              <option value="operating">사업자등록 후 운영 중</option>
-              <option value="pre">예비창업자(사업자등록 전)</option>
-            </select>
-          </label>
-          <div class="field full">
-            <span class="lab">볼 묶음 <span class="opt">선택 · 비우면 네 묶음 전부</span></span>
-            <div class="chips" id="interest-chips">{interest_checks}</div>
-            <span class="hint">세무 담당이면 <strong>정책자금·세제</strong>, 노무 담당이면
-            <strong>고용·노무</strong>만 켜도 됩니다.</span>
-          </div>
-        </div>
-
-        <div class="grid" id="biz-fields" hidden>
-          <label class="field">
-            <span class="lab">창업 상태</span>
-            <select id="biz_status" name="biz_status">
-              <option value="">선택 안 함</option>
-              <option value="pre">예비창업자(사업자등록 전)</option>
-              <option value="operating">사업자등록 후 운영 중</option>
-            </select>
-            <span class="hint">공고마다 예비창업자만/사업자만/둘 다 받습니다.</span>
-          </label>
-          <label class="field">
-            <span class="lab">업력 <span class="opt">운영 중일 때</span></span>
-            <input type="number" id="biz_years" name="biz_years" inputmode="numeric"
-                   min="0" max="60" step="1" placeholder="예: 2">
-            <span class="hint">창업 후 경과 연수입니다. 모르면 비워 두세요.</span>
-          </label>
-          <label class="field">
-            <span class="lab">기업 규모 · 형태</span>
-            <select id="biz_entity" name="biz_entity">
-              <option value="">선택 안 함</option>
-              {entity_options}
-            </select>
-            <span class="hint">개인사업자·소상공인은 중소기업 요건도 함께 충족합니다.</span>
-          </label>
-          <label class="field">
-            <span class="lab">업종 <span class="opt">업종 제한 사업 판정용</span></span>
-            <select id="biz_industry" name="biz_industry">
-              <option value="">선택 안 함</option>
-              {industry_options}
-            </select>
-          </label>
-        </div>
-
-        <div style="margin-top:14px">
-          <label class="field">
-            <span class="lab">키워드 필터 <span class="opt">선택 · 찾고 싶은 지원금만 좁혀 보기</span></span>
-            <input type="text" id="keyword" name="keyword" placeholder="예: 출산, 월세, 전기세, 병원비, 소상공인">
-          </label>
-          <div class="kw-chips" id="kw-chips">
-            <button type="button" data-kw="출산">출산·임신</button>
-            <button type="button" data-kw="전세">전세·주거</button>
-            <button type="button" data-kw="청년">청년</button>
-            <button type="button" data-kw="육아">육아·돌봄</button>
-            <button type="button" data-kw="소상공인">소상공인</button>
-          </div>
-        </div>
-
-        <div style="margin-top:12px">
-          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink-soft);cursor:pointer">
-            <input type="checkbox" id="include_closed"> 지난(마감) 공고도 포함해서 보기
-          </label>
-        </div>
-
-        <div class="actions">
-          <button class="primary" type="submit" id="run">내 지원금 확인하기</button>
-          <button class="ghost" type="button" id="fill-demo">예시로 채워 보기</button>
-        </div>
+        <p class="alt-track">
+          <label><input type="radio" name="track" value="agent"><span>세무·노무 담당자세요? 거래처 리포트 만들기</span></label>
+        </p>
         <div class="status" id="status" role="status" aria-live="polite"></div>
       </form>
+    </section>
+
+    <section class="card" id="results-card" hidden>
+      <div class="summary" id="summary"></div>
+      <div class="share-bar" id="share-bar" data-origin="{share_origin}" data-keys="{share_keys}">
+        <button type="button" id="copy-summary">결과 요약 복사</button>
+        <button type="button" id="copy-link">조건 링크 복사</button>
+        <span class="share-flash" id="share-flash" role="status" aria-live="polite"></span>
+      </div>
+      <p class="sub" id="results-sub"></p>
+      <div class="counts" id="counts"></div>
+      <div id="results"></div>
+      <div class="more-row"><button class="ghost" type="button" id="more-results" hidden>더 보기</button></div>
+      <p class="foot" id="results-foot"></p>
+    </section>
+
+    <section class="card" id="agent-card" hidden>
+      <h2>거래처 리포트</h2>
+      <p class="sub">거래처 한 곳의 업종·규모·지역만으로 지금 신청할 만한 공고를 골라 표로 정리합니다.
+      표는 세무·노무 담당자가 그대로 인쇄해 전달할 수 있습니다.</p>
+      <div class="grid" id="agent-fields">
+        <label class="field">
+          <span class="lab">업종</span>
+          <select id="agent_industry">
+            <option value="">선택 안 함</option>
+            {agent_industry_options}
+          </select>
+        </label>
+        <label class="field">
+          <span class="lab">상시근로자 수</span>
+          <input type="number" id="agent_employees" inputmode="numeric" min="0" max="100000"
+                 step="1" placeholder="예: 3">
+          <span class="hint">대표자 제외 · 월 60시간 미만 제외</span>
+        </label>
+        <label class="field">
+          <span class="lab">연매출 <span class="opt">억 원</span></span>
+          <input type="number" id="agent_revenue_eok" inputmode="decimal" min="0" step="0.1"
+                 placeholder="예: 2">
+        </label>
+        <label class="field">
+          <span class="lab">업력 <span class="opt">년</span></span>
+          <input type="number" id="agent_years" inputmode="numeric" min="0" max="60"
+                 step="1" placeholder="예: 4">
+        </label>
+        <label class="field">
+          <span class="lab">기업 형태</span>
+          <select id="agent_entity">
+            <option value="">자동</option>
+            {entity_options}
+          </select>
+        </label>
+        <label class="field">
+          <span class="lab">사업자 상태</span>
+          <select id="agent_status">
+            <option value="operating">사업자등록 후 운영 중</option>
+            <option value="pre">예비창업자(사업자등록 전)</option>
+          </select>
+        </label>
+        <div class="field full">
+          <span class="lab">볼 묶음 <span class="opt">비우면 전체</span></span>
+          <div class="chips" id="interest-chips">{interest_checks}</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary" type="button" id="agent-run">거래처 리포트 만들기</button>
+      </div>
     </section>
 
     <section class="card" id="report-card" hidden>
@@ -1121,82 +1137,76 @@ PAGE_TEMPLATE = """<!doctype html>
       <p class="foot" id="report-foot"></p>
     </section>
 
-    <section class="card" id="batch-card">
-      <h2>세무·노무사용 거래처 일괄 매칭 <span class="tag">익명 CSV</span></h2>
-      <p class="sub">거래처 50~300곳을 한 번에 올리면 거래처마다 지금 신청할 만한 공고 3~5건을 골라
-      <strong>1페이지 요약(인쇄·PDF)</strong>과 <strong>CSV</strong>로 정리합니다. 한 곳씩 돌리는
-      &lsquo;사업자·대리인 리포트&rsquo;와 같은 판정 규격(같은 엔진·같은 묶음·같은 우선순위)을 씁니다.</p>
-      <p class="anon"><strong>상호명·사업자번호는 서버 매칭에 쓰지 않고 조건 코드만 처리합니다.</strong><br>
-      상호·사업자번호·대표자·연락처·이메일·상세주소 열은 <strong>값을 읽지 않고 버립니다</strong>
-      (열 이름만 응답에 남김). 결과는 익명 코드 <code>client_ref</code> 기준이라, 원본 파일에서
-      VLOOKUP 으로 다시 붙이면 됩니다.</p>
-      <label class="field" style="margin-top:14px">
-        <span class="lab">거래처 CSV</span>
-        <textarea id="batch-csv" rows="8" spellcheck="false"
-          placeholder="client_ref,industry,industry_keyword,entity,employment,employees_bracket,revenue_bracket,business_age_years,region&#10;C-001,음식숙박,한식,소상공인,청년,5인 미만,1억~2억,4,인천광역시 서구"></textarea>
-        <span class="hint">열 이름은 한글도 됩니다(거래처코드·업종·업종키워드·기업형태·고용이슈·직원수구간·
-        연매출·업력·지역·비고). 매출은 <code>revenue_krw</code>(원) 또는 <code>revenue_bracket</code>(구간) 중
-        하나로 주세요. 고용 이슈는 <code>청년</code>·<code>고령</code>·<code>육아휴직</code>·<code>장애인</code>·
-        <code>사회보험료</code>를 쉼표로 구분해 넣으면 그 이슈를 다루는 공고를 앞자리에 넣습니다.</span>
-      </label>
-      <div class="actions" style="margin-top:12px">
-        <button class="ghost" type="button" id="batch-sample">샘플 CSV 채우기</button>
-        <button class="ghost" type="button" id="batch-download-sample">샘플 CSV 다운로드</button>
-        <button class="primary" type="button" id="batch-run">거래처 일괄 매칭</button>
-      </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--ink-soft)">
-        <label style="display:inline-flex;gap:6px;align-items:center">
-          <input type="checkbox" id="batch-labels"> note 열을 표시용 라벨로 함께 보기(매칭 미사용)
-        </label>
-        <label style="display:inline-flex;gap:6px;align-items:center">
-          <input type="checkbox" id="batch-top5" checked> 거래처당 5건(해제 시 3건)
-        </label>
-      </div>
-      <div class="status" id="batch-status" role="status" aria-live="polite"></div>
-      <div class="report-sum" id="batch-summary"></div>
-      <p class="hint" id="batch-note" hidden></p>
-      <div class="report-actions" id="batch-actions" hidden></div>
-      <div id="batch-preview"></div>
-    </section>
-
-    <section class="card" id="results-card" hidden>
-      <h2>판정 결과</h2>
-      <div class="share-bar" id="share-bar" data-origin="{share_origin}" data-keys="{share_keys}">
-        <button type="button" id="copy-summary">결과 요약 복사</button>
-        <button type="button" id="copy-link">조건 링크 복사</button>
-        <span class="share-flash" id="share-flash" role="status" aria-live="polite"></span>
-      </div>
-      <p class="sub" id="results-sub"></p>
-      <div class="counts" id="counts"></div>
-      <div id="results"></div>
-      <p class="foot" id="results-foot"></p>
-    </section>
-
-    <section class="card">
+    <section class="card" id="how">
       <h2>이 판정은 어떻게 하나요</h2>
       <p class="sub"><strong>개인·가구</strong>는 정부24 <strong>보조금24</strong>가 제도마다 공개한
       <strong>자격 코드</strong>(연령·성별·중위소득 구간·생애·가구·직업)를 제 조건과 대조합니다.
       <strong>창업·소상공인·기업</strong>은 <strong>K-Startup</strong>·<strong>기업마당</strong> 공고의
       구조화된 신청자격(업력·연령·지역·대상·성별)을 대조합니다. AI가 문장을 읽고 추측하지 않습니다.</p>
       <div class="links">
-        <a href="#batch-card">거래처 일괄 매칭(익명 CSV)</a>
-        <a href="#inquiry-card">대량 매칭·연동 문의</a>
-        <a href="/s/">주제별 지원금 모아보기</a>
+        <a href="/s/">주제별 지원금</a>
         <a href="/regions/">시·도별 지원금</a>
         <a href="/guides/">자주 묻는 지원금 질문</a>
-        <a href="/v1/meta">서비스·데이터 상태</a>
+        <a href="/v1/meta">데이터 상태</a>
         <a href="/v1/stats">익명 사용 통계</a>
         <a href="/llms.txt">AI·개발자용 안내</a>
       </div>
-      <p class="sub" style="margin-top:14px"><strong>창업·소상공인</strong>이라면 지원금을 받기 전에 걸리는 규제를 같이 보세요.
-      <strong>프랜차이즈</strong>는 공정위 정보공개서로 브랜드별 평균매출·폐점률·법 위반 이력을
+      <p class="sub" style="margin-top:14px"><strong>창업·소상공인</strong>이라면 지원금을 받기 전에 걸리는 규제를
+      같이 보세요. <strong>프랜차이즈</strong>는 공정위 정보공개서로 브랜드별 평균매출·폐점률·법 위반 이력을
       <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer">FRNC 프랜차이즈 창업 리스크 체크</a>에서,
       <strong>수입·유통</strong>은 통관 요건·인증·식약처 이력을
       <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer">CLNS 수입·유통 규제 체크</a>에서
       무료로 확인할 수 있습니다.</p>
     </section>
 
+    <section class="card" id="batch-card">
+      <details class="block">
+        <summary>세무·노무사용 거래처 일괄 매칭 (익명 CSV)</summary>
+        <div class="block-body">
+          <p class="sub">거래처 50~300곳을 한 번에 올리면 거래처마다 지금 신청할 만한 공고 3~5건을 골라
+          <strong>1페이지 요약(인쇄·PDF)</strong>과 <strong>CSV</strong>로 정리합니다. 한 곳씩 돌리는
+          &lsquo;거래처 리포트&rsquo;와 같은 판정 규격을 씁니다.</p>
+          <p class="anon"><strong>상호명·사업자번호는 서버 매칭에 쓰지 않고 조건 코드만 처리합니다.</strong><br>
+          상호·사업자번호·대표자·연락처·이메일·상세주소 열은 <strong>값을 읽지 않고 버립니다</strong>
+          (열 이름만 응답에 남김). 결과는 익명 코드 <code>client_ref</code> 기준이라, 원본 파일에서
+          VLOOKUP 으로 다시 붙이면 됩니다.</p>
+          <label class="field" style="margin-top:14px">
+            <span class="lab">거래처 CSV</span>
+            <textarea id="batch-csv" rows="8" spellcheck="false"
+              placeholder="client_ref,industry,industry_keyword,entity,employment,employees_bracket,revenue_bracket,business_age_years,region&#10;C-001,음식숙박,한식,소상공인,청년,5인 미만,1억~2억,4,인천광역시 서구"></textarea>
+            <span class="hint">열 이름은 한글도 됩니다(거래처코드·업종·업종키워드·기업형태·고용이슈·직원수구간·
+            연매출·업력·지역·비고). 매출은 <code>revenue_krw</code>(원) 또는 <code>revenue_bracket</code>(구간) 중
+            하나로 주세요.</span>
+          </label>
+          <div class="actions">
+            <button class="ghost" type="button" id="batch-sample">샘플 CSV 채우기</button>
+            <button class="ghost" type="button" id="batch-download-sample">샘플 CSV 다운로드</button>
+            <button class="primary" type="button" id="batch-run">거래처 일괄 매칭</button>
+          </div>
+          <div class="links">
+            <label class="check-line"><input type="checkbox" id="batch-labels"> note 열을 표시용 라벨로 함께 보기</label>
+            <label class="check-line"><input type="checkbox" id="batch-top5" checked> 거래처당 5건(해제 시 3건)</label>
+          </div>
+          <div class="status" id="batch-status" role="status" aria-live="polite"></div>
+          <div class="report-sum" id="batch-summary"></div>
+          <p class="hint" id="batch-note" hidden></p>
+          <div class="report-actions" id="batch-actions" hidden></div>
+          <div id="batch-preview"></div>
+        </div>
+      </details>
+    </section>
+
     {guides_footer}
+
+    <section class="card" id="siblings">
+      <h2>같이 쓰는 서비스</h2>
+      <p class="sub">같은 팀이 무료로 운영하는 두 도구입니다. 세 서비스 모두 회원가입·결제가 없고,
+      판정은 정부·공정위가 공개한 원본 자료로만 합니다.</p>
+      <div class="links">
+        <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer"><strong>CLNS</strong> — 수입·유통 규제 체크</a>
+        <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer"><strong>FRNC</strong> — 프랜차이즈 창업 리스크 체크</a>
+      </div>
+    </section>
 
     <section class="card inquiry" id="inquiry-card">
       <h2>세무·노무사 리포트 · 대량 매칭 문의 <span class="tag">선택</span></h2>
@@ -1208,7 +1218,6 @@ PAGE_TEMPLATE = """<!doctype html>
           <span class="lab">연락처 <span class="opt">이메일 또는 전화</span></span>
           <input type="text" id="inquiry-contact" name="contact" maxlength="120"
                  autocomplete="off" placeholder="회신받을 이메일 또는 연락처">
-          <span class="hint">3~120자. 회신 목적으로만 쓰고 통계에는 넣지 않습니다.</span>
         </label>
         <label class="field">
           <span class="lab">문의 유형</span>
@@ -1217,10 +1226,9 @@ PAGE_TEMPLATE = """<!doctype html>
             <option value="api_mcp">API·MCP 연동</option>
             <option value="other">그 밖의 문의</option>
           </select>
-          <span class="hint">리포트는 거래처 50~300곳까지 한 번에 처리합니다.</span>
         </label>
       </div>
-      <label class="field" style="margin-top:12px">
+      <label class="field">
         <span class="lab">문의 내용 <span class="opt">선택 · 500자</span></span>
         <textarea id="inquiry-message" name="message" rows="3" maxlength="500"
           placeholder="예: 거래처 80곳을 매달 돌리고 싶습니다. CSV 형식과 결과 전달 방법이 궁금합니다."></textarea>
@@ -1230,41 +1238,36 @@ PAGE_TEMPLATE = """<!doctype html>
       </div>
       <div class="status" id="inquiry-status" role="status" aria-live="polite"></div>
       <p class="inquiry-note">연락처는 회신 목적으로만 서버에 보관하고(최대 180일),
-      <a href="/v1/stats">사용 통계</a>에는 넣지 않습니다. 이 화면의 판정 입력(나이·지역·소득)은
-      여전히 저장하지 않습니다.</p>
+      <a href="/v1/stats">사용 통계</a>에는 넣지 않습니다.</p>
     </section>
 
-    <section class="card" id="siblings">
-      <h2>같이 쓰는 서비스</h2>
-      <p class="sub">같은 팀이 무료로 운영하는 두 도구입니다. 세 서비스 모두 회원가입·결제가 없고,
-      판정은 정부·공정위가 공개한 원본 자료로만 합니다.</p>
-      <div class="links">
-        <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer"><strong>CLNS</strong> — 수입·유통 규제 체크(세관장확인·KC·식약처·리콜)</a>
-        <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer"><strong>FRNC</strong> — 프랜차이즈 창업 리스크 체크(정보공개서·폐점률)</a>
-      </div>
-    </section>
+    <p class="data-note">{data_note}</p>
 
     <p class="foot">
       <strong>같이 쓰는 서비스</strong> —
       <a href="https://clns-kr.onrender.com/" target="_blank" rel="noopener noreferrer">CLNS 수입·유통 규제 체크</a> ·
       <a href="https://frnc.onrender.com/" target="_blank" rel="noopener noreferrer">FRNC 프랜차이즈 창업 리스크 체크</a>
       <br>
-      <strong>개인정보</strong> — <strong>판정 입력으로는</strong> 이름·주민등록번호·전화번호를
-      받지 않습니다. 입력한 나이·지역·소득구간·사업자 조건은 판정 계산에만 쓰고 서버에 저장하지 않습니다
-      (브라우저 저장소도 쓰지 않음). 서버에는 툴 이름과 판정 등급의 <em>익명 일별 횟수</em>만
-      남습니다. 결과가 <strong>0건으로 끝난 검색어</strong>만, 지역명·연락처·숫자를 지운 30자 이내
-      형태로 남겨 다음 데이터 확충에 씁니다. <a href="/v1/stats">남기는 항목 보기</a>
-      <br>예외는 위의 <strong>문의 카드</strong> 하나입니다 — 거기 적어 보낸 연락처는 회신 목적만으로
-      따로 보관하고(최대 180일), 이 통계에는 건수도 넣지 않습니다.
+      개인정보 — 판정 입력으로는 이름·주민등록번호·전화번호를 받지 않고, 입력한 나이·지역·소득구간·사업자
+      조건은 판정 계산에만 쓰고 <strong>서버에 저장하지 않습니다</strong>(브라우저 저장소도 쓰지 않음).
       <br>
-      <strong>한계</strong> — 공개 데이터 기반 사전 점검이며 수급·선정 자격을 확정하지 않습니다.
-      재산·거주기간 등 코드로 표현되지 않은 요건과 지자체 원본 공백, 공고문의 서술형 요건은
-      &lsquo;확인 필요&rsquo;로 표시합니다. 창업·기업 사업의 &lsquo;받을 가능성 높음&rsquo;은 신청자격
-      충족을 뜻하고, 선정은 평가·경쟁으로 결정됩니다. 최종 판단은 소관기관 심사입니다.
+      한계 — 공개 데이터 기반 사전 점검이며 수급·선정 자격을 <strong>확정하지 않습니다</strong>. 최종 판단은
+      소관기관 심사입니다.
       <br>
-      <strong>고지</strong> — <a href="/privacy">개인정보 처리방침</a> ·
+      <a href="/privacy">개인정보 처리방침</a> ·
       <a href="/terms">이용약관</a> · <a href="/about">서비스 소개</a> · v{version}
     </p>
+    <details class="privacy-more">
+      <summary>개인정보·통계에 남는 것 자세히</summary>
+      <p>서버에는 툴 이름과 판정 등급의 <em>익명 일별 횟수</em>만 남습니다. 결과가 <strong>0건으로 끝난
+      검색어</strong>만, 지역명·연락처·숫자를 지운 30자 이내 형태로 남겨 다음 데이터 확충에 씁니다.
+      <a href="/v1/stats">남기는 항목 보기</a><br>
+      예외는 위의 <strong>문의 카드</strong> 하나입니다 — 거기 적어 보낸 연락처는 회신 목적만으로
+      따로 보관하고(최대 180일), 이 통계에는 건수도 넣지 않습니다.<br>
+      재산·거주기간 등 코드로 표현되지 않은 요건과 지자체 원본 공백, 공고문의 서술형 요건은
+      &lsquo;확인 필요&rsquo;로 표시합니다. 창업·기업 사업의 &lsquo;받을 가능성 높음&rsquo;은 신청자격
+      충족을 뜻하고, 선정은 평가·경쟁으로 결정됩니다.</p>
+    </details>
   </main>
 </div>
 <script>
@@ -1272,14 +1275,18 @@ PAGE_TEMPLATE = """<!doctype html>
   var SIGUNGU = {sigungu_map};
   var sido = document.getElementById('sido');
   var sigungu = document.getElementById('sigungu');
+  var sigunguField = document.getElementById('sigungu-field');
+
   function resetSigungu(){{
     var list = SIGUNGU[sido.value] || [];
-    sigungu.innerHTML = '<option value="">선택 안 함</option>';
+    sigungu.innerHTML = '<option value="">전체</option>';
     list.forEach(function(name){{
       var option = document.createElement('option');
       option.value = name; option.textContent = name;
       sigungu.appendChild(option);
     }});
+    // 시·도를 고르기 전에는 시·군·구 칸을 숨긴다 — 첫 화면은 '지역' 한 칸만.
+    sigunguField.hidden = !sido.value;
   }}
   sido.addEventListener('change', resetSigungu);
   resetSigungu();
@@ -1292,11 +1299,19 @@ PAGE_TEMPLATE = """<!doctype html>
     var track = currentTrack();
     document.getElementById('personal-fields').hidden = track !== 'personal';
     document.getElementById('biz-fields').hidden = track !== 'business';
-    document.getElementById('agent-fields').hidden = track !== 'agent';
+    document.getElementById('agent-card').hidden = track !== 'agent';
     var runBtn = document.getElementById('run');
     if (runBtn) {{
       runBtn.textContent = track === 'agent' ? '거래처 리포트 만들기'
-        : (track === 'business' ? '우리 회사 지원사업 확인하기' : '내 지원금 확인하기');
+        : (track === 'business' ? '우리 회사 지원사업 찾기' : '지원금 찾기');
+    }}
+    var extra = document.getElementById('more-extra');
+    if (extra) {{
+      extra.textContent = track === 'business' ? '업력·업종·규모' : '나이·소득·상황';
+    }}
+    if (track === 'agent') {{
+      var more = document.getElementById('more-conditions');
+      if (more) {{ more.open = false; }}
     }}
   }}
   Array.prototype.slice.call(document.querySelectorAll('input[name=track]'))
@@ -1358,35 +1373,63 @@ PAGE_TEMPLATE = """<!doctype html>
     return node;
   }}
 
+  // 결과 화면 상태
+  var PAGE_SIZE = 10;
   var activeFilter = 'none';
-  var activeKind = 'none';
-  var activeField = 'all';
-  var lastData = null;      // 지금 그린 응답(판정 하나만 받은 것일 수 있다)
-  var fullData = null;      // 판정 필터가 없는 전체 응답
-  var lastPayload = null;   // 같은 조건으로 다시 조회할 때 쓰는 요청 본문
-  var serverVerdict = null; // 서버에서 판정 하나만 골라 받아 왔는지
+  var lastData = null;       // 지금 그린 응답(판정 하나만 받은 것일 수 있다)
+  var fullData = null;       // 판정 필터가 없는 전체 응답
+  var lastPayload = null;    // 같은 조건으로 다시 조회할 때 쓰는 요청 본문
+  var serverVerdict = null;  // 서버에서 판정 하나만 골라 받아 왔는지
   var fetching = false;
+  var shown = PAGE_SIZE;
   var VERDICT_LABELS = {{
     eligible_likely: '받을 가능성 높음',
     check_needed: '조건 확인 필요',
     insufficient_info: '정보 부족'
   }};
+  var VERDICT_RANK = {{eligible_likely: 0, check_needed: 1, insufficient_info: 2}};
+  // 분야 표시 순서 — 같은 판정·비슷한 마감 안에서 주거→보육→고용 순으로 읽히게.
+  var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
+  var fieldRank = {{}};
+  fieldOrder.forEach(function(name, index){{ fieldRank[name] = index; }});
 
-  function kindMatches(row, kind){{
-    return kind === 'program' ? row.benefit_kind === 'program' : row.benefit_kind !== 'program';
+  function fieldBucket(row){{
+    var fl = String(row.field_label || row.field || '기타').trim();
+    if (/주거|주택|전세|월세/.test(fl)) return '주거·주택';
+    if (/보육|교육|아동|양육/.test(fl)) return '보육·교육';
+    if (/고용|창업|사업화|정책자금|R&D|멘토링/.test(fl)) return '고용·창업·경제';
+    if (/보건|의료|건강/.test(fl)) return '보건·의료';
+    if (/문화|체육|관광|행사/.test(fl)) return '문화·여가';
+    if (/농림|어업/.test(fl)) return '농림·어업';
+    if (/생활|복지/.test(fl)) return '생활·복지';
+    return '행정·기타';
   }}
 
-  // 탭 숫자는 results(상한에 잘린 목록)가 아니라 서버가 센 전체 집계를 쓴다.
-  // 예전에는 50건으로 잘린 목록을 세서 할당량(34/16)이 건수처럼 보였다.
+  // 요약·칩 숫자는 반환 목록(상한에 잘림)이 아니라 서버 집계를 쓴다.
   function verdictTotal(result, kind, code){{
     var kv = result.kind_verdict_counts;
     if (!kv) return null;
-    if (kind === 'none') {{
+    if (!kind || kind === 'none') {{
       var grant = (kv.grant && kv.grant[code]) || 0;
       var program = (kv.program && kv.program[code]) || 0;
       return grant + program;
     }}
     return (kv[kind] && kv[kind][code]) || 0;
+  }}
+
+  function countOf(result, code){{
+    var count = verdictTotal(result, 'none', code);
+    if (count !== null) return count;
+    count = 0;
+    (result.results || []).forEach(function(row){{
+      if (row.verdict && row.verdict.code === code) count += 1;
+    }});
+    return count;
+  }}
+
+  function baseResult(){{
+    if (fullData && fullData.result) return fullData.result;
+    return (lastData && lastData.result) || {{}};
   }}
 
   function refetchVerdict(code){{
@@ -1415,207 +1458,251 @@ PAGE_TEMPLATE = """<!doctype html>
     }}).finally(function(){{ fetching = false; }});
   }}
 
-  function renderResults(data){{
+  function goFullView(){{
+    activeFilter = 'none';
+    if (serverVerdict) {{
+      serverVerdict = null;
+      renderResults(fullData || lastData);
+    }} else {{
+      renderResults(lastData);
+    }}
+  }}
+
+  function applyVerdict(code){{
+    var total = countOf(baseResult(), code);
+    var have = 0;
+    (((lastData || {{}}).result || {{}}).results || []).forEach(function(row){{
+      if (row.verdict && row.verdict.code === code) have += 1;
+    }});
+    if (serverVerdict === code) {{ activeFilter = code; renderResults(lastData); return; }}
+    if (lastPayload && (serverVerdict || have < total)) {{
+      activeFilter = code;
+      refetchVerdict(code);
+      return;
+    }}
+    activeFilter = code;
+    renderResults(lastData);
+  }}
+
+  function deadlineDays(row){{
+    var deadline = ((row.application || {{}}).deadline) || {{}};
+    var left = deadline.days_left;
+    return (typeof left === 'number') ? left : null;
+  }}
+
+  // 받을 가능성 → 마감 임박 → 분야 순. 조건에 맞는 것을 위에 둔다.
+  function sortRows(rows){{
+    return rows.slice().sort(function(a, b){{
+      var ra = VERDICT_RANK[(a.verdict || {{}}).code];
+      var rb = VERDICT_RANK[(b.verdict || {{}}).code];
+      if (ra === undefined) ra = 9;
+      if (rb === undefined) rb = 9;
+      if (ra !== rb) return ra - rb;
+      var da = deadlineDays(a), db = deadlineDays(b);
+      var na = (da === null) ? 1e9 : da;
+      var nb = (db === null) ? 1e9 : db;
+      if (na !== nb) return na - nb;
+      var fa = fieldRank[fieldBucket(a)], fb = fieldRank[fieldBucket(b)];
+      return (fa === undefined ? 9 : fa) - (fb === undefined ? 9 : fb);
+    }});
+  }}
+
+  // 맨 위 요약 — "총 N건 찾았어요 / 신청 가능 M건".
+  function renderSummary(){{
+    var summary = document.getElementById('summary');
+    var counts = document.getElementById('counts');
+    summary.innerHTML = '';
+    counts.innerHTML = '';
+
+    var result = baseResult();
+    var kindTotals = result.kind_counts;
+    var total = result.matched_total;
+    if (total === null || total === undefined) {{
+      total = kindTotals ? ((kindTotals.grant || 0) + (kindTotals.program || 0))
+        : ((result.results || []).length);
+    }}
+    var eligible = countOf(result, 'eligible_likely');
+    var check = countOf(result, 'check_needed');
+    var info = countOf(result, 'insufficient_info');
+
+    var main = el('p', 'sum-main');
+    main.appendChild(document.createTextNode('총 '));
+    main.appendChild(el('b', null, String(total)));
+    main.appendChild(document.createTextNode('건 찾았어요'));
+    summary.appendChild(main);
+
+    var sub = el('p', 'sum-sub');
+    sub.appendChild(document.createTextNode('신청 가능 '));
+    sub.appendChild(el('b', null, String(eligible)));
+    sub.appendChild(document.createTextNode('건 · 조건 확인 필요 ' + check + '건 · 정보 부족 ' + info + '건'));
+    summary.appendChild(sub);
+
+    var activeCode = serverVerdict || (activeFilter === 'none' ? 'all' : activeFilter);
+    [['all', '전체', total],
+     ['eligible_likely', VERDICT_LABELS.eligible_likely, eligible],
+     ['check_needed', VERDICT_LABELS.check_needed, check],
+     ['insufficient_info', VERDICT_LABELS.insufficient_info, info]].forEach(function(opt){{
+      if (opt[0] !== 'all' && !opt[2]) return;
+      var button = el('button', activeCode === opt[0] ? 'active' : null,
+        opt[1] + ' ' + opt[2] + '건');
+      button.type = 'button';
+      button.addEventListener('click', function(){{
+        if (opt[0] === 'all' || activeCode === opt[0]) {{ goFullView(); return; }}
+        applyVerdict(opt[0]);
+      }});
+      counts.appendChild(button);
+    }});
+
+    if (serverVerdict) {{
+      var back = el('button', null, '전체 결과로 돌아가기');
+      back.type = 'button';
+      back.style.marginLeft = '2px';
+      back.addEventListener('click', goFullView);
+      counts.appendChild(back);
+    }}
+  }}
+
+  function buildCard(row){{
+    var wrap = el('article', 'result');
+    var top = el('div', 'result-top');
+    top.appendChild(el('h3', null, row.name || '이름 미기재'));
+    var verdict = row.verdict || {{}};
+    top.appendChild(el('span', 'badge ' + (verdict.code || ''), verdict.label_ko || ''));
+    wrap.appendChild(top);
+
+    if (row.amount) {{
+      wrap.appendChild(el('p', 'amount', String(row.amount)));
+    }}
+
+    var app = row.application || {{}};
+    var deadline = app.deadline || {{}};
+    var left = deadline.days_left;
+    var meta = el('p', 'meta');
+    if (typeof left === 'number' && left >= 0 && left <= 7) {{
+      meta.appendChild(el('b', null, 'D-' + left + ' 마감임박'));
+      meta.appendChild(document.createTextNode(' · '));
+    }}
+    var when = deadline.end_date ? ('마감 ' + deadline.end_date)
+      : (deadline.label_ko || app.deadline_text || '마감일 미기재');
+    meta.appendChild(document.createTextNode(when));
+    if (row.agency) {{
+      meta.appendChild(document.createTextNode(' · ' + row.agency));
+    }}
+    wrap.appendChild(meta);
+
+    var cta = el('div', 'cta');
+    if (row.online_url) {{
+      var apply = el('a', null, '신청하러 가기');
+      apply.href = row.online_url;
+      apply.target = '_blank';
+      apply.rel = 'noopener noreferrer';
+      cta.appendChild(apply);
+    }}
+    if (row.detail_url) {{
+      var detail = el('a', 'ghost', '공고 자세히');
+      detail.href = row.detail_url;
+      detail.target = '_blank';
+      detail.rel = 'noopener noreferrer';
+      cta.appendChild(detail);
+    }}
+    if (cta.childNodes.length) {{ wrap.appendChild(cta); }}
+
+    var details = el('details', 'more');
+    details.appendChild(el('summary', null, '자세히 보기'));
+    if (row.business_summary_ko) {{
+      details.appendChild(el('p', null, '신청자격: ' + row.business_summary_ko));
+    }}
+    if (row.amount) {{
+      details.appendChild(el('p', null, '지원 내용: ' + row.amount));
+    }}
+    var why = el('div', 'why');
+    why.appendChild(el('strong', null, '판정 근거'));
+    var list = el('ul');
+    (row.why || []).forEach(function(rule){{
+      if (rule.state === 'pass' || rule.state === 'fail' || rule.state === 'unknown') {{
+        list.appendChild(el('li', null, rule.reason_ko));
+      }}
+    }});
+    why.appendChild(list);
+    details.appendChild(why);
+
+    var missing = row.missing_information || [];
+    if (missing.length) {{
+      var ask = el('div', 'ask');
+      ask.appendChild(el('strong', null, '이걸 알려 주시면 더 정확해져요'));
+      var ul = el('ul');
+      missing.forEach(function(item){{ ul.appendChild(el('li', null, item.question_ko)); }});
+      ask.appendChild(ul);
+      details.appendChild(ask);
+    }}
+
+    ['신청기한: ' + (app.deadline_text || deadline.label_ko || '미기재'),
+     '신청방법: ' + (app.how || '미기재'),
+     '문의처: ' + (row.contact || '미기재'),
+     '데이터 기준일: ' + (row.source_updated_at || '미기재')].forEach(function(line){{
+      details.appendChild(el('p', null, line));
+    }});
+    if (row.criteria_excerpt) {{
+      details.appendChild(el('p', null, '선정기준(원문): ' + row.criteria_excerpt
+        + (row.criteria_state === 'missing' ? ' — 원본에 선정기준이 비어 있습니다.' : '')));
+    }}
+    if (row.criteria_flags && row.criteria_flags.length) {{
+      details.appendChild(el('p', null, '원문에 함께 있는 요건: ' + row.criteria_flags.join(', ')));
+    }}
+    if (row.attribution_ko) {{
+      details.appendChild(el('p', 'origin', row.attribution_ko));
+    }}
+    wrap.appendChild(details);
+    return wrap;
+  }}
+
+  // 아무 조건 없이 찾았는지 — 그때는 화면이 '전부'를 보여 주므로 한 줄 안내를 붙인다.
+  function noCondition(){{
+    var kw = document.getElementById('keyword');
+    return !sido.value && !sigungu.value && !(kw && kw.value.trim())
+      && !document.getElementById('birth_year').value && !selectedSituations().length;
+  }}
+
+  function renderResults(data, keepPage){{
     lastData = data;
     if (!serverVerdict && !(data.result && data.result.verdict_filter)) {{ fullData = data; }}
-    // 공유 버튼(결과 요약·조건 링크)이 방금 그린 결과를 쓰도록 넘겨 준다.
     if (window.GRNT_SHARE && window.GRNT_SHARE.update) {{
       window.GRNT_SHARE.update(data);
     }}
     var result = data.result || {{}};
     var card = document.getElementById('results-card');
     var box = document.getElementById('results');
-    var counts = document.getElementById('counts');
-    box.innerHTML = ''; counts.innerHTML = '';
+    if (!keepPage) {{ shown = PAGE_SIZE; }}
+    box.innerHTML = '';
     card.hidden = false;
 
+    renderSummary();
+
     var allRows = result.results || [];
-    var fieldOrder = ['주거·주택', '보육·교육', '고용·창업·경제', '생활·복지', '보건·의료', '문화·여가', '농림·어업', '행정·기타'];
-    // 이전 동적 필터 바 정리
-    document.querySelectorAll('.sub-bar-dyn').forEach(function(elNode){{ elNode.remove(); }});
+    var rows = sortRows(activeFilter === 'none' ? allRows : allRows.filter(function(row){{
+      return row.verdict && row.verdict.code === activeFilter;
+    }}));
 
-    // 1단: 큰 분류 (지원금·바우처 vs 교육·건강·프로그램) 딱 2개만 먼저 노출
-    // 숫자는 상한 전 전체 집계(kind_counts) — 반환 목록에서 세지 않는다.
-    var kindTotals = result.kind_counts || null;
-    var grantCnt = kindTotals ? (kindTotals.grant || 0)
-      : allRows.filter(function(r){{ return r.benefit_kind !== 'program'; }}).length;
-    var progCnt = kindTotals ? (kindTotals.program || 0)
-      : allRows.filter(function(r){{ return r.benefit_kind === 'program'; }}).length;
-    if (activeKind === 'grant' && grantCnt === 0 && progCnt > 0) {{ activeKind = 'none'; }}
-    if (activeKind === 'program' && progCnt === 0 && grantCnt > 0) {{ activeKind = 'none'; }}
-    var kindTabs = [
-      ['grant', '지원금·바우처'],
-      ['program', '교육·건강·프로그램']
-    ];
-    var kindCounts = {{ grant: grantCnt, program: progCnt }};
-    kindTabs.forEach(function(pair){{
-      var k = pair[0], label = pair[1];
-      var kbtn = document.createElement('button');
-      kbtn.type = 'button';
-      kbtn.className = activeKind === k ? 'active' : '';
-      kbtn.style.fontWeight = '600';
-      kbtn.textContent = label + ' ' + kindCounts[k] + '건';
-      kbtn.addEventListener('click', function(){{
-        if (activeKind === k) {{
-          activeKind = 'none';
-          activeFilter = 'none';
-          activeField = 'all';
-        }} else {{
-          activeKind = k;
-          activeFilter = 'none';
-          activeField = 'all';
-        }}
-        if (serverVerdict) {{
-          // 판정 하나만 받아 온 상태라면 전체 응답으로 돌아가 종류를 다시 센다.
-          serverVerdict = null;
-          renderResults(fullData || lastData);
-        }} else {{
-          renderResults(lastData);
-        }}
-      }});
-      counts.appendChild(kbtn);
-    }});
-
-    // 2단: 판정별 필터 — 종류를 고르지 않아도 보인다.
-    // '조건 확인 필요'는 이 서비스의 핵심 결과인데, 상한에 걸려 일부만 들어 왔으면
-    // 그 판정만 서버에 다시 물어 전체를 받아 온다(재조회). 숫자는 언제나 전체 집계.
-    var kindRows = activeKind === 'none'
-      ? allRows
-      : allRows.filter(function(r){{ return kindMatches(r, activeKind); }});
-
-    var subBox = document.createElement('div');
-    subBox.className = 'sub-bar-dyn sub-bar';
-    var labels = {{
-      all: '전체',
-      eligible_likely: '받을 가능성 높음',
-      check_needed: '조건 확인 필요',
-      insufficient_info: '정보 부족'
-    }};
-    var kindTotal = activeKind === 'none' ? (grantCnt + progCnt) : kindCounts[activeKind];
-    var verdictBar = document.createElement('div');
-    verdictBar.className = 'counts';
-
-    function returnedFor(code){{
-      return allRows.filter(function(r){{
-        return r.verdict && r.verdict.code === code &&
-          (activeKind === 'none' || kindMatches(r, activeKind));
-      }}).length;
+    var trackNote = result.track === 'business' ? '창업·기업'
+      : (result.track === 'agent' ? '거래처 리포트' : '개인·가구');
+    var subText = trackNote + ' 조건으로 제도 ' + (result.scanned || 0) + '건을 살펴봤어요';
+    if (result.closed_hidden) {{
+      subText += ' (지난 공고 ' + result.closed_hidden + '건 제외)';
     }}
-
-    function goFullView(){{
-      activeFilter = 'none';
-      activeField = 'all';
-      if (serverVerdict) {{
-        serverVerdict = null;
-        renderResults(fullData || lastData);
-      }} else {{
-        renderResults(lastData);
-      }}
-    }}
-
-    function applyVerdict(code){{
-      activeField = 'all';
-      var total = verdictTotal(result, activeKind, code);
-      var have = returnedFor(code);
-      if (total === null) {{ total = have; }}
-      if (serverVerdict === code) {{ activeFilter = code; renderResults(lastData); return; }}
-      if (lastPayload && (serverVerdict || have < total)) {{
-        activeFilter = code;
-        refetchVerdict(code);
-        return;
-      }}
-      activeFilter = code;
-      renderResults(lastData);
-    }}
-
-    Object.keys(labels).forEach(function(code){{
-      var cnt = code === 'all' ? kindTotal : verdictTotal(result, activeKind, code);
-      if (cnt === null) {{ cnt = code === 'all' ? kindRows.length : returnedFor(code); }}
-      if (code !== 'all' && !cnt) return;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = activeFilter === code ? 'active' : '';
-      btn.textContent = labels[code] + ' ' + cnt + '건';
-      btn.addEventListener('click', function(){{
-        if (activeFilter === code || code === 'all') {{
-          goFullView();
-          return;
-        }}
-        applyVerdict(code);
-      }});
-      verdictBar.appendChild(btn);
-    }});
-    subBox.appendChild(verdictBar);
-
-    var verdictRows = kindRows;
-    if (activeFilter !== 'none' && activeFilter !== 'all') {{
-      verdictRows = kindRows.filter(function(r){{
-        return r.verdict && r.verdict.code === activeFilter;
-      }});
-    }}
-
-    if (activeFilter !== 'none') {{
-      var fieldCounts = {{}};
-      verdictRows.forEach(function(r){{
-        var b = fieldBucket(r);
-        fieldCounts[b] = (fieldCounts[b] || 0) + 1;
-      }});
-      var fieldBar = document.createElement('div');
-      fieldBar.className = 'counts field-bar';
-      var fAllBtn = document.createElement('button');
-      fAllBtn.type = 'button';
-      fAllBtn.className = activeField === 'all' ? 'active' : '';
-      fAllBtn.textContent = '전체 분야 ' + verdictRows.length + '건';
-      fAllBtn.addEventListener('click', function(){{ activeField = 'all'; renderResults(lastData); }});
-      fieldBar.appendChild(fAllBtn);
-      fieldOrder.forEach(function(fb){{
-        if (!fieldCounts[fb]) return;
-        var fbBtn = document.createElement('button');
-        fbBtn.type = 'button';
-        fbBtn.className = activeField === fb ? 'active' : '';
-        fbBtn.textContent = fb + ' ' + fieldCounts[fb] + '건';
-        fbBtn.addEventListener('click', function(){{ activeField = fb; renderResults(lastData); }});
-        fieldBar.appendChild(fbBtn);
-      }});
-      subBox.appendChild(fieldBar);
-    }}
-
-    if (serverVerdict) {{
-      var backBtn = el('button', 'btn-link', '전체 결과로 돌아가기');
-      backBtn.type = 'button';
-      backBtn.style.marginTop = '8px';
-      backBtn.addEventListener('click', goFullView);
-      subBox.appendChild(backBtn);
-    }}
-    counts.parentNode.insertBefore(subBox, counts.nextSibling);
-
-    function fieldBucket(row){{
-      var fl = String(row.field_label || row.field || '기타').trim();
-      if (/주거|주택|전세|월세/.test(fl)) return '주거·주택';
-      if (/보육|교육|아동|양육/.test(fl)) return '보육·교육';
-      if (/고용|창업|사업화|정책자금|R&D|멘토링/.test(fl)) return '고용·창업·경제';
-      if (/보건|의료|건강/.test(fl)) return '보건·의료';
-      if (/문화|체육|관광|행사/.test(fl)) return '문화·여가';
-      if (/농림|어업/.test(fl)) return '농림·어업';
-      if (/생활|복지/.test(fl)) return '생활·복지';
-      return '행정·기타';
-    }}
-
-    var trackNote = result.track === 'business' ? '창업·기업 트랙' : '개인·가구 트랙';
-    var hiddenNote = result.closed_hidden ? (' · 지난 공고 ' + result.closed_hidden + '건 제외') : '';
-    var shownNote = '';
     if (result.verdict_filter) {{
-      shownNote = ' · ' + (VERDICT_LABELS[result.verdict_filter] || result.verdict_filter) +
-        ' ' + (result.matched_total || 0) + '건';
+      subText += ' · ' + (VERDICT_LABELS[result.verdict_filter] || result.verdict_filter)
+        + ' ' + (result.matched_total || 0) + '건';
       if (result.truncated) {{
-        shownNote += ' 중 상위 ' + (result.returned || 0) + '건';
+        subText += ' 중 상위 ' + (result.returned || 0) + '건';
       }}
     }} else if (result.truncated && result.matched_total) {{
-      shownNote = ' · 조건에 맞는 ' + result.matched_total + '건 중 상위 ' + (result.returned || 0) + '건 표시';
+      subText += ' · 조건에 맞는 ' + result.matched_total + '건 중 상위 ' + (result.returned || 0) + '건';
     }}
-    document.getElementById('results-sub').textContent =
-      trackNote + ' · 제도 ' + (result.scanned || 0) + '건을 대조했습니다' + hiddenNote + shownNote + '. ' +
-      '아래 버튼으로 종류(지원금·프로그램)와 판정을 골라 볼 수 있습니다.';
+    subText += '. 판정은 확정이 아니라 사전 점검이에요.';
+    if (noCondition()) {{
+      subText += ' 지역이나 검색어를 넣으면 후보가 훨씬 줄어들어요.';
+    }}
+    document.getElementById('results-sub').textContent = subText;
 
     if (result.keyword_note_ko) {{
       var kwNotice = el('div', 'notice');
@@ -1626,169 +1713,31 @@ PAGE_TEMPLATE = """<!doctype html>
 
     var portalStatus = result.local_portal_status || null;
     if (portalStatus && portalStatus.supported === false && portalStatus.notice_ko) {{
-      var notice = el('div', 'notice');
-      notice.style.margin = '0 0 14px';
-      notice.textContent = '구·군청 자체 공지 안내: ' + portalStatus.notice_ko;
-      box.appendChild(notice);
+      var portalNotice = el('div', 'notice');
+      portalNotice.style.margin = '0 0 14px';
+      portalNotice.textContent = '구·군청 자체 공지 안내: ' + portalStatus.notice_ko;
+      box.appendChild(portalNotice);
     }}
 
-    var rows = verdictRows.filter(function(r){{
-      if (activeField !== 'all' && fieldBucket(r) !== activeField) return false;
-      return true;
-    }});
     if (!rows.length) {{
       box.appendChild(el('div', 'empty',
-        (activeFilter === 'all' || activeFilter === 'none')
-          ? '조건에 맞는 후보가 나오지 않았습니다. 지역·소득구간·상황 또는 사업자 조건을 바꿔 다시 시도해 보세요.'
-          : '선택한 판정의 결과 중 위 분야에 해당하는 것이 없습니다. 다른 판정이나 분야를 누르거나 조건을 넓혀 보세요.'));
+        activeFilter === 'none'
+          ? '조건에 맞는 지원금을 찾지 못했어요. 지역을 바꾸거나 검색어를 지우고 다시 찾아보세요.'
+          : '이 판정에 해당하는 항목이 없어요. 위의 전체를 눌러 다시 보세요.'));
     }}
-    function buildCard(row){{
-      var wrap = el('div', 'result');
-      wrap.style.padding = '12px 14px';
-      var head = el('div', 'result-head');
-      head.style.cursor = 'pointer';
-      var left = el('div');
-      var title = el('h4');
-      title.appendChild(document.createTextNode(row.name || ''));
-      title.appendChild(el('span', 'tag', row.track === 'business' ? '창업·기업' : '개인·가구'));
-      var deadlineInfo = (row.application || {{}}).deadline || {{}};
-      var dLeft = deadlineInfo.days_left;
-      if (dLeft !== null && dLeft !== undefined && dLeft >= 0 && dLeft <= 7) {{
-        var dBadge = el('span', 'deadline-pill soon', 'D-' + dLeft + ' 마감임박');
-        dBadge.style.marginLeft = '6px';
-        title.appendChild(dBadge);
-      }}
-      left.appendChild(title);
-      var metaParts = [
-        row.agency || '',
-        row.field_label || '',
-        row.benefit_kind === 'program' ? '교육·건강·프로그램' : '지원금·혜택',
-        (row.region && row.region.label ? row.region.label : '')
-      ].filter(Boolean);
-      var deadlineLabel = deadlineInfo.label_ko || (row.application || {{}}).deadline_text || '';
-      if (deadlineLabel && !(dLeft !== null && dLeft !== undefined && dLeft >= 0 && dLeft <= 7)) {{
-        metaParts.push(deadlineLabel);
-      }}
-      left.appendChild(el('p', 'meta', metaParts.join(' · ')));
-      head.appendChild(left);
-      head.appendChild(el('span', 'badge ' + row.verdict.code, row.verdict.label_ko));
-      wrap.appendChild(head);
+    rows.slice(0, shown).forEach(function(row){{ box.appendChild(buildCard(row)); }});
 
-      var details = el('details');
-      details.style.marginTop = '8px';
-      details.appendChild(el('summary', null, '설명 · 판정 근거 · 신청 방법 보기'));
-      head.addEventListener('click', function(){{ details.open = !details.open; }});
-
-      if (row.business_summary_ko) {{
-        details.appendChild(el('p', 'meta', '신청자격: ' + row.business_summary_ko));
-      }}
-      if (row.amount) {{
-        var amt = el('p', 'amount', row.amount);
-        amt.classList.add('expanded');
-        amt.style.marginTop = '8px';
-        details.appendChild(amt);
-      }}
-
-      if (row.online_url || row.detail_url) {{
-        var quick = el('div', 'card-links');
-        quick.style.marginTop = '8px';
-        if (row.online_url) {{
-          var onBtn = el('a', 'btn-link', '온라인 신청');
-          onBtn.href = row.online_url; onBtn.target = '_blank'; onBtn.rel = 'noopener noreferrer';
-          quick.appendChild(onBtn);
-        }}
-        if (row.detail_url) {{
-          var detBtn = el('a', 'btn-link', '공고·상세 보기');
-          detBtn.href = row.detail_url; detBtn.target = '_blank'; detBtn.rel = 'noopener noreferrer';
-          quick.appendChild(detBtn);
-        }}
-        details.appendChild(quick);
-      }}
-
-      var why = el('div', 'why');
-      why.appendChild(el('strong', null, '판정 근거'));
-      var list = el('ul');
-      (row.why || []).forEach(function(rule){{
-        if (rule.state === 'pass' || rule.state === 'fail' || rule.state === 'unknown') {{
-          list.appendChild(el('li', null, rule.reason_ko));
-        }}
-      }});
-      why.appendChild(list);
-      details.appendChild(why);
-
-      var missing = row.missing_information || [];
-      if (missing.length) {{
-        var ask = el('div', 'ask');
-        ask.appendChild(el('strong', null, '이걸 알려 주시면 더 정확히 판정합니다'));
-        var ul = el('ul');
-        missing.forEach(function(item){{ ul.appendChild(el('li', null, item.question_ko)); }});
-        ask.appendChild(ul);
-        details.appendChild(ask);
-      }}
-
-      var deadline = (row.application || {{}}).deadline || {{}};
-      var lines = [
-        '신청기한: ' + ((row.application || {{}}).deadline_text || deadline.label_ko || '미기재'),
-        '신청방법: ' + ((row.application || {{}}).how || '미기재'),
-        '문의처: ' + (row.contact || '미기재'),
-        '데이터 기준일: ' + (row.source_updated_at || '미기재')
-      ];
-      if (row.criteria_excerpt) {{
-        lines.push('선정기준(원문): ' + row.criteria_excerpt +
-          (row.criteria_state === 'missing' ? ' — 원본에 선정기준이 비어 있습니다.' : ''));
-      }}
-      lines.forEach(function(line){{ details.appendChild(el('p', null, line)); }});
-      if (row.criteria_flags && row.criteria_flags.length) {{
-        details.appendChild(el('p', null, '원문에 함께 있는 요건: ' + row.criteria_flags.join(', ')));
-      }}
-      if (row.attribution_ko) {{
-        details.appendChild(el('p', 'origin', row.attribution_ko));
-      }}
-      wrap.appendChild(details);
-      return wrap;
-    }}
-
-    if (activeField === 'all' && rows.length > 0) {{
-      var grouped = {{}};
-      rows.forEach(function(r){{
-        var b = fieldBucket(r);
-        if (!grouped[b]) grouped[b] = [];
-        grouped[b].push(r);
-      }});
-      fieldOrder.forEach(function(fb){{
-        var list = grouped[fb];
-        if (!list || !list.length) return;
-        var sec = el('div', 'field-group');
-        var hdr = el('h3', 'field-group-hdr', fb + ' (' + list.length + '건)');
-        sec.appendChild(hdr);
-        var PREVIEW = 5;
-        list.slice(0, PREVIEW).forEach(function(r){{ sec.appendChild(buildCard(r)); }});
-        if (list.length > PREVIEW) {{
-          var extraWrap = el('div', null);
-          extraWrap.style.display = 'none';
-          list.slice(PREVIEW).forEach(function(r){{ extraWrap.appendChild(buildCard(r)); }});
-          sec.appendChild(extraWrap);
-          var moreG = el('button', 'btn-link', '+ ' + fb + ' 나머지 ' + (list.length - PREVIEW) + '건 더 보기');
-          moreG.type = 'button';
-          moreG.style.marginTop = '6px';
-          moreG.addEventListener('click', function(){{
-            var open = extraWrap.style.display !== 'none';
-            extraWrap.style.display = open ? 'none' : 'block';
-            moreG.textContent = open
-              ? ('+ ' + fb + ' 나머지 ' + (list.length - PREVIEW) + '건 더 보기')
-              : (fb + ' 접기');
-          }});
-          sec.appendChild(moreG);
-        }}
-        box.appendChild(sec);
-      }});
+    var moreBtn = document.getElementById('more-results');
+    if (rows.length > shown) {{
+      moreBtn.hidden = false;
+      moreBtn.textContent = '더 보기 (' + (rows.length - shown) + '건)';
     }} else {{
-      rows.forEach(function(row){{ box.appendChild(buildCard(row)); }});
+      moreBtn.hidden = true;
     }}
 
     var notes = (result.profile && result.profile.missing_core) || [];
     document.getElementById('results-foot').textContent = notes.length
-      ? '추가로 알려 주시면 판정이 늘어납니다: ' + notes.map(function(item){{return item.question_ko;}}).join(' ')
+      ? '더 알려 주시면 판정이 정확해져요: ' + notes.map(function(item){{return item.question_ko;}}).join(' ')
       : (result.disclaimer_ko || '');
   }}
 
@@ -1937,7 +1886,9 @@ PAGE_TEMPLATE = """<!doctype html>
       var d7Head = el('h3', null, '마감 임박(D-7)');
       d7Head.appendChild(el('small', null, '이번 주에 신청을 끝내야 하는 공고'));
       d7Sec.appendChild(d7Head);
-      d7Sec.appendChild(reportTable(result.d7));
+      var d7Wrap = el('div', 'table-wrap');
+      d7Wrap.appendChild(reportTable(result.d7));
+      d7Sec.appendChild(d7Wrap);
       box.appendChild(d7Sec);
     }}
 
@@ -1947,7 +1898,9 @@ PAGE_TEMPLATE = """<!doctype html>
       title.appendChild(el('small', null,
         (section.duty_ko || '') + ' · ' + (section.count || 0) + '건'));
       sec.appendChild(title);
-      sec.appendChild(reportTable(section.rows || []));
+      var tableWrap = el('div', 'table-wrap');
+      tableWrap.appendChild(reportTable(section.rows || []));
+      sec.appendChild(tableWrap);
       box.appendChild(sec);
     }});
 
@@ -1989,15 +1942,19 @@ PAGE_TEMPLATE = """<!doctype html>
 
   var form = document.getElementById('check');
   var status = document.getElementById('status');
-  form.addEventListener('submit', function(event){{
-    event.preventDefault();
-    if (currentTrack() === 'agent') {{
-      runReport();
-      return;
+
+  function setTrack(value){{
+    var radio = document.querySelector('input[name=track][value="' + value + '"]');
+    if (radio && !radio.checked) {{
+      radio.checked = true;
+      radio.dispatchEvent(new Event('change', {{bubbles: true}}));
     }}
+  }}
+
+  function search(){{
     var button = document.getElementById('run');
     button.disabled = true;
-    status.textContent = '판정 중…';
+    status.textContent = '찾는 중…';
     var includeClosedEl = document.getElementById('include_closed');
     var kwEl = document.getElementById('keyword');
     var payload = {{
@@ -2011,11 +1968,9 @@ PAGE_TEMPLATE = """<!doctype html>
       payload.keyword = kwEl.value.trim();
     }}
     activeFilter = 'none';
-    activeKind = 'none';
-    activeField = 'all';
-    lastPayload = payload;
     serverVerdict = null;
     fullData = null;
+    lastPayload = payload;
     fetch('/v1/tools/search_subsidies', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
@@ -2030,49 +1985,46 @@ PAGE_TEMPLATE = """<!doctype html>
       renderResults(data);
       document.getElementById('results-card').scrollIntoView({{behavior:'smooth', block:'start'}});
     }}).catch(function(error){{
-      status.textContent = '조회에 실패했습니다(' + error.message + '). 잠시 뒤 다시 시도해 주세요.';
+      status.textContent = '찾지 못했습니다(' + error.message + '). 잠시 뒤 다시 시도해 주세요.';
     }}).finally(function(){{
       button.disabled = false;
     }});
+  }}
+
+  form.addEventListener('submit', function(event){{
+    event.preventDefault();
+    if (currentTrack() === 'agent') {{
+      runReport();
+      return;
+    }}
+    search();
   }});
 
-  Array.prototype.slice.call(document.querySelectorAll('#kw-chips button')).forEach(function(btn){{
+  var agentRun = document.getElementById('agent-run');
+  if (agentRun) {{
+    agentRun.addEventListener('click', function(){{
+      form.dispatchEvent(new Event('submit', {{cancelable: true}}));
+    }});
+  }}
+
+  // 대표 예시 — 누르면 조건을 채우고 바로 찾는다.
+  Array.prototype.slice.call(document.querySelectorAll('.examples button')).forEach(function(btn){{
     btn.addEventListener('click', function(){{
       var kwInput = document.getElementById('keyword');
-      if (kwInput) {{
-        kwInput.value = btn.getAttribute('data-kw') || '';
-        form.dispatchEvent(new Event('submit', {{cancelable: true}}));
-      }}
+      if (kwInput) {{ kwInput.value = btn.getAttribute('data-kw') || ''; }}
+      var target = btn.getAttribute('data-track');
+      if (target) {{ setTrack(target); }}
+      search();
     }});
   }});
 
-  document.getElementById('fill-demo').addEventListener('click', function(){{
-    if (currentTrack() === 'agent') {{
-      sido.value = '인천광역시'; resetSigungu(); sigungu.value = '서해구';
-      document.getElementById('agent_industry').value = 'food';
-      document.getElementById('agent_employees').value = '3';
-      document.getElementById('agent_revenue_eok').value = '2';
-      document.getElementById('agent_years').value = '4';
-      document.getElementById('agent_entity').value = '';
-      document.getElementById('agent_status').value = 'operating';
-      return;
-    }}
-    document.getElementById('birth_year').value = '1992';
-    document.querySelector('input[name=sex][value=male]').checked = true;
-    sido.value = '인천광역시'; resetSigungu(); sigungu.value = '서해구';
-    if (currentTrack() === 'business') {{
-      document.getElementById('biz_status').value = 'pre';
-      document.getElementById('biz_entity').value = 'pre_startup';
-      document.getElementById('biz_years').value = '';
-    }} else {{
-      document.getElementById('household_size').value = '2';
-      document.getElementById('income_band').value = 'JA0203';
-      ['no_home', 'worker', 'birth'].forEach(function(key){{
-        var input = document.querySelector('input[name=situation][value="' + key + '"]');
-        if (input) {{ input.checked = true; }}
-      }});
-    }}
-  }});
+  var moreResults = document.getElementById('more-results');
+  if (moreResults) {{
+    moreResults.addEventListener('click', function(){{
+      shown += PAGE_SIZE;
+      renderResults(lastData, true);
+    }});
+  }}
 }})();
 </script>
 <script>{share_script}</script>

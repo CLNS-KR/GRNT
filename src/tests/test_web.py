@@ -214,10 +214,11 @@ class DarkModeContrastTest(unittest.TestCase):
             self.assertIn(token + ":", dark, token)
 
     def test_surfaces_are_painted_with_tokens(self):
-        self.assertIn(".sub-bar{margin-top:10px", self.css)
+        # 요약 박스·접힌 세부 조건·선택된 칩은 모두 토큰으로만 칠한다.
+        self.assertIn(".summary{padding:20px", self.css)
         self.assertIn("background:var(--surface-2)", self.css)
-        self.assertIn(".field-group-hdr{", self.css)
-        self.assertIn("background:var(--surface-3)", self.css)
+        self.assertIn("details.more-conditions{", self.css)
+        self.assertIn(".counts button.active{background:var(--ink)", self.css)
         self.assertIn("border-top:1px dashed var(--line)", self.css)
 
     def test_text_on_brand_colour_uses_token(self):

@@ -40,7 +40,7 @@ class ServerJsonTest(unittest.TestCase):
     def test_registry_manifest_shape(self):
         self.assertIn("$schema", self.manifest)
         self.assertTrue(self.manifest["name"].startswith("io.github."))
-        self.assertEqual(self.manifest["version"], "0.4.11")
+        self.assertEqual(self.manifest["version"], "0.4.12")
         self.assertTrue(self.manifest["description"])
         self.assertEqual(self.manifest["remotes"][0]["type"], "streamable-http")
         self.assertTrue(self.manifest["remotes"][0]["url"].endswith("/mcp"))
