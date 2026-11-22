@@ -389,23 +389,82 @@ def _local_portal_prefix(service_id: Any) -> str:
     return match.group(0) if match else ""
 
 
-def _merge_local_rows(new_rows: List[Dict[str, Any]],
-                      existing_rows: List[Dict[str, Any]]) -> tuple:
-    """이번 수집에서 0건이 나온 포털은 **일시 실패**로 보고 기존 행을 유지한다.
+def _local_portal_key(service_id: Any) -> str:
+    """병합 단위 키 — 브라보(BROSO)는 시·도별로 나눠 센다.
 
-    포털 개편·차단·타임아웃은 흔합니다. 그때 그 포털 항목을 통째로 지우면 카탈로그가
-    조용히 줄어드므로, 한 건이라도 받은 포털만 새 것으로 교체합니다.
+    브라보는 17개 시·도가 모두 `BROSO-` 접두어를 쓰므로 접두어로만 묶으면 한 시·도가
+    통째로 실패해도(예: 세종 0건) 전체 브라보가 2% 줄었을 뿐이라 감소 보호가 걸리지
+    않는다. 그래서 `BROSO-{시도}` 를 키로 써서 지역 단위 손실을 잡는다.
     """
-    new_prefixes = {_local_portal_prefix(row.get("서비스ID")) for row in new_rows}
-    new_prefixes.discard("")
+    parts = str(service_id or "").upper().split("-")
+    if parts and parts[0] == "BROSO" and len(parts) >= 2 and parts[1]:
+        return f"BROSO-{parts[1]}"
+    return _local_portal_prefix(service_id)
+
+
+# 기존 행을 보존할 "비정상 감소" 기준 — 한 포털(브라보는 시·도)의 수집 건수가 기존보다
+# 20% 넘게 그리고 5건 넘게 줄면 페이지 상한·포털 개편 같은 수집 사고로 본다.
+# 마감 제외처럼 정상적인 감소는 이 선을 넘지 않게 잡았다(하루 만에 한 포털이 20%씩
+# 줄어드는 것은 정상 마감 속도가 아니다).
+LOCAL_SHRINK_RATIO = 0.2
+LOCAL_SHRINK_MIN_ITEMS = 5
+
+
+def _local_prefix_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        key = _local_portal_key(row.get("서비스ID"))
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _merge_local_rows(new_rows: List[Dict[str, Any]],
+                      existing_rows: List[Dict[str, Any]], *,
+                      grace_days: int = 30,
+                      include_expired: bool = False,
+                      shrink_ratio: float = LOCAL_SHRINK_RATIO,
+                      shrink_min: int = LOCAL_SHRINK_MIN_ITEMS) -> tuple:
+    """이번 수집 결과로 기존 지자체 행을 교체하되, **증발한 행은 함부로 지우지 않는다**.
+
+    두 가지를 본다.
+
+    1. **0건인 포털(브라보는 시·도)** — 포털 개편·차단·타임아웃은 흔하다. 한 건도 못 받은
+       단위는 일시 실패로 보고 기존 행을 그대로 둔다.
+    2. **큰 폭으로 줄어든 포털(브라보는 시·도)** — 받긴 했는데 기존 대비 20%·5건 넘게 줄면 페이지 상한에
+       잘렸거나 응답이 일부만 온 것이다(2026-11-22 브라보 상한 8페이지 → 987→741건).
+       이때는 새로 받은 행으로 교체하면서, 이번에 보이지 않은 기존 행을 보존한다.
+       마감된 공고는 `programs.is_current`(grace_days)로 걸러 다시 살아나지 않게 한다.
+
+    반환: (병합 행, 0건으로 기존 유지한 키, {키: 보존한 행 수})
+    """
+    new_ids = {str(row.get("서비스ID") or "").strip() for row in new_rows}
+    new_counts = _local_prefix_counts(new_rows)
+    existing_counts = _local_prefix_counts(existing_rows)
+
     kept: List[Dict[str, Any]] = []
-    kept_prefixes = set()
+    kept_prefixes: set = set()
+    guarded: Dict[str, int] = {}
     for row in existing_rows:
-        prefix = _local_portal_prefix(row.get("서비스ID"))
-        if prefix and prefix not in new_prefixes:
+        key = _local_portal_key(row.get("서비스ID"))
+        if not key:
+            continue
+        if key not in new_counts:
             kept.append(row)
-            kept_prefixes.add(prefix)
-    return list(new_rows) + kept, kept_prefixes
+            kept_prefixes.add(key)
+            continue
+        old_count = existing_counts.get(key, 0)
+        drop = old_count - new_counts.get(key, 0)
+        if old_count <= 0 or drop < max(1, shrink_min) or drop / old_count < shrink_ratio:
+            continue  # 정상 범위의 감소 — 새 수집 결과를 그대로 쓴다
+        service_id = str(row.get("서비스ID") or "").strip()
+        if service_id in new_ids:
+            continue  # 이미 새 행에 있다
+        if not include_expired and not programs.is_current(row, grace_days=grace_days):
+            continue  # 마감이 지난 행은 되살리지 않는다
+        kept.append(row)
+        guarded[key] = guarded.get(key, 0) + 1
+    return list(new_rows) + kept, kept_prefixes, guarded
 
 
 def _existing_rows(root: str) -> List[Dict[str, Any]]:
@@ -437,7 +496,7 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
              max_services: Optional[int] = None, max_pages: Optional[int] = None,
              grace_days: int = 30, include_expired: bool = False,
              max_records: Optional[int] = None, delay: float = 0.0,
-             include_local_portals: bool = False, broso_max_pages: int = 8,
+             include_local_portals: bool = False, broso_max_pages: Optional[int] = None,
              dry_run: bool = False,
              log: Callable[[str], None] = lambda message: None) -> Dict[str, Any]:
     """세 데이터셋을 하나의 카탈로그로 합치고 일자별 스냅샷을 남긴다."""
@@ -493,9 +552,12 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
         # 별도 수집기가 필요하다. 실패하면 기존 지자체 행을 그대로 유지한다(부분 실패 허용).
         from . import local_portals
 
+        # None 이면 수집기 기본값(시·도별 전체 페이지를 덮는 상한)을 쓴다 — 상한을 한 곳에서만 정한다.
+        max_pages_per_sido = (int(broso_max_pages) if broso_max_pages
+                              else int(local_portals.BROSO_MAX_PAGES_DEFAULT))
         try:
             collected_local = local_portals.collect_all_local_portals(
-                include_expired=include_expired, broso_max_pages=broso_max_pages)
+                include_expired=include_expired, broso_max_pages=max_pages_per_sido)
         except Exception as exc:  # noqa: BLE001 - 포털 개편·차단은 흔한 실패다
             collected_local = {"records": [], "counts": {}}
             warnings.append(f"지자체 포털 수집 실패({type(exc).__name__}): 기존 항목을 유지합니다.")
@@ -503,18 +565,47 @@ def sync_all(service_key: Optional[str] = None, *, data_dir: Optional[str] = Non
                       if isinstance(row, dict)]
         existing_local = [row for row in _existing_rows(root)
                           if str(row.get("source") or "") == "local_portal"]
-        merged_local, kept_prefixes = _merge_local_rows(local_rows, existing_local)
+        merged_local, kept_prefixes, guarded_prefixes = _merge_local_rows(
+            local_rows, existing_local, grace_days=grace_days,
+            include_expired=include_expired)
         local_counts = dict(collected_local.get("counts") or {})
         if kept_prefixes:
             local_counts["kept_from_previous"] = sorted(kept_prefixes)
             warnings.append(
                 "지자체 포털 " + ", ".join(sorted(kept_prefixes))
                 + " 에서 새 항목을 받지 못해 기존 행을 유지했습니다.")
+        if guarded_prefixes:
+            preserved = sum(guarded_prefixes.values())
+            judged = _local_prefix_counts(local_rows)
+            local_counts["preserved_on_shrink"] = dict(sorted(guarded_prefixes.items()))
+            warnings.append(
+                "지자체 포털 " + ", ".join(f"{prefix}({judged.get(prefix, 0)}건)"
+                                          for prefix in sorted(guarded_prefixes))
+                + f" 수집이 기존보다 크게 줄어 이번에 보이지 않은 기존 행 {preserved}건을 "
+                "유지했습니다(페이지 상한·포털 개편 여부를 확인하세요).")
+        truncated = [slug for slug in (local_counts.get("broso_truncated") or [])]
+        if truncated:
+            warnings.append(
+                "지역사회서비스포털 " + ", ".join(truncated)
+                + " 이 시·도별 페이지 상한에 걸려 전체를 읽지 못했습니다"
+                f"(broso_max_pages={max_pages_per_sido}).")
+        local_errors = [slug for slug in (local_counts.get("broso_errors") or [])]
+        if local_errors:
+            warnings.append(
+                "지역사회서비스포털 " + ", ".join(local_errors)
+                + " 응답을 받지 못했습니다(일시 오류일 수 있어 기존 행을 유지합니다).")
+        partial = [slug for slug in (local_counts.get("broso_partial") or [])
+                   if slug not in local_errors]
+        if partial:
+            warnings.append(
+                "지역사회서비스포털 " + ", ".join(partial)
+                + " 일부 페이지를 읽지 못했습니다(가져온 만큼만 반영).")
         if merged_local:
             rows.extend(merged_local)
             source_stats["local_portal"] = {
                 "label": "지자체 자체 복지포털",
-                "state": "network+기존유지" if kept_prefixes else "network",
+                "state": ("network+기존유지" if (kept_prefixes or guarded_prefixes)
+                          else "network"),
                 "services": len(merged_local),
                 "counts": local_counts,
             }
@@ -656,6 +747,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--delay", type=float, default=0.0, help="호출 간 대기(초)")
     parser.add_argument("--local-portals", action="store_true",
                         help="지자체 자체 복지포털도 함께 수집(부평·인천·서울·경기·세종·브라보)")
+    parser.add_argument("--broso-max-pages", type=int, default=0,
+                        help="지역사회서비스포털 시·도별 최대 페이지(0=기본 40, 시·도 전체 순회)")
     parser.add_argument("--dry-run", action="store_true", help="파일을 쓰지 않고 결과만 확인")
     parser.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     args = parser.parse_args(argv)
@@ -706,6 +799,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             max_records=args.max_programs or None,
             delay=args.delay,
             include_local_portals=args.local_portals,
+            broso_max_pages=args.broso_max_pages or None,
             dry_run=args.dry_run,
             log=lambda message: print(f"· {message}", file=sys.stderr, flush=True),
         )

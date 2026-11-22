@@ -6,7 +6,8 @@
    복지포털**(부평복지ON·인천 맞춤형수혜·인천 1인가구·서울 WIS·경기민원24·세종·브라보)을
    `sync_gov24.sync_all`(include_local_portals)로 다시 받아 `catalog.json` 을 갱신합니다.
    네트워크·인증키·포털 개편으로 일부 소스가 실패해도 기존 카탈로그 행으로 메우므로
-   **부분 실패를 허용**합니다.
+   **부분 실패를 허용**합니다. 브라보(지역사회서비스포털)는 시·도별로 포털이 밝힌 총 건수만큼
+   끝까지 읽고(기본 상한 40페이지), 한 시·도의 수집이 크게 줄면 기존 행을 보존합니다.
 2. **만료 인덱스 재생성** — 오늘 날짜 기준으로 `catalog.sqlite` 를 다시 만들어
    `is_expired`·`is_closed_biz` 플래그와 마감 인덱스가 현재 상태를 반영하게 합니다.
    `catalog.sqlite` 는 배포 이미지에서 처음 뜰 때 만들어지므로, 서버를 오래 켜 두면
@@ -224,7 +225,7 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
             dry_run: bool = False, compress: bool = True, ttl_hours: float = 0.0,
             grace_days: int = 30, max_pages: Optional[int] = None,
             delay: float = 0.0, include_local_portals: bool = True,
-            broso_max_pages: int = 8, keep_days: int = snapshots.KEEP_DAYS,
+            broso_max_pages: Optional[int] = None, keep_days: int = snapshots.KEEP_DAYS,
             log: Callable[[str], None] = _log) -> Dict[str, Any]:
     """재수집 → 만료 인덱스 재생성 → (바뀐 경우) 압축본 갱신. 결과 요약을 돌려준다."""
     root = data_dir or default_data_dir()
@@ -440,6 +441,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--delay", type=float, default=0.0, help="호출 간 대기(초)")
     parser.add_argument("--keep-days", type=int, default=snapshots.KEEP_DAYS,
                         help=f"스냅샷 보관 일수(기본 {snapshots.KEEP_DAYS}일 = compare_ledgers 일자별 비교)")
+    parser.add_argument("--broso-max-pages", type=int, default=0,
+                        help="지역사회서비스포털 시·도별 최대 페이지(0=기본 40, 시·도 전체 순회)")
     parser.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     args = parser.parse_args(argv)
 
@@ -466,6 +469,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_pages=int(args.max_pages) or None,
         delay=max(0.0, float(args.delay)),
         include_local_portals=not args.no_local,
+        broso_max_pages=args.broso_max_pages or None,
         keep_days=max(1, int(args.keep_days)),
         log=(lambda message: None) if args.json else _log,
     )

@@ -10,6 +10,7 @@ import html
 import math
 import re
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -36,6 +37,17 @@ GG24_BASE = "https://gg24.gg.go.kr"
 GG24_LIST_URL = GG24_BASE + "/svcreqst/selectPageListSvcReqst.do?pageIndex={page}"
 SEJONG_SUBSIDY_URL = "https://www.sejong.go.kr/prog/bokjiro24/sejong/people/citizen/sub03_1204/extonline/list.do"
 BROSO_URL_TMPL = "https://www.broso.or.kr/{slug}/hp/svc/SelectServiceSeach.do"
+
+# 브라보(지역사회서비스포털)는 목록을 **한 페이지 10건**으로만 내려줍니다(`pageUnit` 을 키워도
+# 10건 그대로). 그래서 시·도별 페이지 상한이 곧 수집 상한이 됩니다. 0.4.10 까지 상한이
+# 8페이지(80건)라 경기 394건·경남 259건·서울 193건 등이 잘려 나갔고, 그 상태로 카탈로그를
+# 덮어써 지자체 공고가 987 → 741건으로 조용히 줄었습니다(2026-11-22). 40페이지면
+# 가장 큰 경기(394건 = 40페이지)까지 전량 커버합니다.
+BROSO_PAGE_SIZE = 10
+BROSO_MAX_PAGES_DEFAULT = 40
+# 한 시·도를 도는 데 쓰는 시간 상한(초). 포털이 느려지거나 응답이 멎어도 페이지 순회가
+# 전체 갱신을 붙잡지 않게 한다. 넘기면 받은 데까지 쓰고 '미완주'로 표시한다.
+BROSO_REGION_BUDGET_S = 240.0
 
 BROSO_REGIONS: List[Tuple[str, str]] = [
     ("seoul", "서울특별시"),
@@ -714,60 +726,143 @@ def parse_broso_list_html(body: str, *, slug: str, sido: str,
     return records
 
 
-def fetch_broso_region(slug: str, sido: str, *, max_pages: int = 8,
+def fetch_broso_region(slug: str, sido: str, *, max_pages: int = BROSO_MAX_PAGES_DEFAULT,
                        today: Optional[date] = None,
-                       timeout: float = 8.0) -> List[Dict[str, Any]]:
+                       timeout: float = 8.0,
+                       budget_s: float = BROSO_REGION_BUDGET_S,
+                       report: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """한 시·도의 지역사회서비스 목록을 **총 건수만큼** 끝까지 읽는다.
+
+    `report` 를 주면 읽은 페이지 수·포털이 밝힌 총 건수·상한에 잘렸는지(`truncated`)를
+    그 dict 에 적는다(수집 요약·경고에 쓴다). 수집 자체는 실패해도 빈 목록으로 끝나고,
+    실패 원인은 `report["error"]` 에 남긴다.
+    """
+    started = time.monotonic()
     url = BROSO_URL_TMPL.format(slug=slug)
+    info: Dict[str, Any] = {"pages": 0, "total": None, "max_pages": max(1, int(max_pages)),
+                            "truncated": False, "complete": False, "error": None}
     try:
         first_body = _fetch_html(url, timeout=timeout, retries=2)
-    except (ssl.SSLError, urllib.error.URLError, TimeoutError, OSError):
+    except (ssl.SSLError, urllib.error.URLError, TimeoutError, OSError) as exc:
+        info["error"] = type(exc).__name__
+        info["partial"] = True      # 첫 페이지부터 막혔어도 다음 바퀴에 다시 시도한다
+        info["complete"] = False
+        if report is not None:
+            report.update(info)
         return []
 
     m_cnt = re.search(r"총\s*\(?\s*(\d+)\s*건", first_body)
-    total_cnt = int(m_cnt.group(1)) if m_cnt else 10
-    total_pages = min(max(1, max_pages), max(1, math.ceil(total_cnt / 10)))
+    total_cnt = int(m_cnt.group(1)) if m_cnt else None
+    info["total"] = total_cnt
+    limit = max(1, int(max_pages))
+    if total_cnt is None:
+        # 총 건수 표시가 없으면 빈 페이지·새 항목 0건이 나올 때까지 상한 안에서 순회한다.
+        total_pages = limit
+    else:
+        needed = max(1, math.ceil(total_cnt / BROSO_PAGE_SIZE))
+        total_pages = min(limit, needed)
+        info["truncated"] = needed > total_pages
 
     all_rows = parse_broso_list_html(first_body, slug=slug, sido=sido, today=today)
     seen_ids = {r["서비스ID"] for r in all_rows}
+    page_no = 1          # 마지막으로 성공한 페이지
+    pages_read = 1       # 실제로 받은 페이지 수(중간 페이지 실패가 있어도 세는다)
+    budget_hit = False
 
     for page in range(2, total_pages + 1):
-        try:
-            body = _fetch_html(
-                url,
-                timeout=timeout,
-                data=urllib.parse.urlencode({"pageIndex": str(page)}).encode("utf-8"),
-                retries=2,
-            )
-        except (ssl.SSLError, urllib.error.URLError, TimeoutError, OSError):
+        if time.monotonic() - started > budget_s:
+            budget_hit = True
+            break
+        body: Optional[str] = None
+        # 한 페이지의 TLS 오류(`[SSL] record layer failure`)는 이 포털에서 간헐적으로 난다.
+        # 한 번 실패로 끝내면 그 뒤 페이지까지 통째로 날아가므로, 짧은 간격으로 세 번 시도하고
+        # 그래도 안 되면 그 페이지만 건너뛰고 다음으로 넘어간다(가져온 만큼은 지킨다).
+        for attempt in range(3):
+            try:
+                body = _fetch_html(
+                    url,
+                    timeout=timeout,
+                    data=urllib.parse.urlencode({"pageIndex": str(page)}).encode("utf-8"),
+                    retries=0,
+                )
+                break
+            except (ssl.SSLError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                info["error"] = type(exc).__name__
+                if attempt == 2 or time.monotonic() - started > budget_s:
+                    break
+                time.sleep(0.4 * (attempt + 1))
+        if body is None:
             continue
+        page_no = page
+        pages_read += 1
         rows = parse_broso_list_html(body, slug=slug, sido=sido, today=today)
         if not rows:
             break
+        added = 0
         for row in rows:
             if row["서비스ID"] not in seen_ids:
                 seen_ids.add(row["서비스ID"])
                 all_rows.append(row)
+                added += 1
+        if added == 0:
+            # 같은 페이지가 다시 오면(페이지 파라미터 무시) 더 돌아도 소용없다.
+            break
+    info["pages"] = pages_read
+    info["last_page"] = page_no
+    info["complete"] = pages_read >= total_pages and not budget_hit
+    info["partial"] = not info["complete"]
+    info["budget_exceeded"] = budget_hit
+    if report is not None:
+        report.update(info)
     return all_rows
 
 
-def fetch_broso_all(*, max_pages_per_sido: int = 8,
+def fetch_broso_all(*, max_pages_per_sido: int = BROSO_MAX_PAGES_DEFAULT,
                     today: Optional[date] = None,
-                    timeout: float = 8.0) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    results: List[Dict[str, Any]] = []
+                    timeout: float = 8.0,
+                    budget_s: float = BROSO_REGION_BUDGET_S,
+                    reports: Optional[Dict[str, Any]] = None,
+                    retry_rounds: int = 2) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """전국 시·도 지역사회서비스를 모은다.
+
+    페이지 하나가 TLS 오류로 빠지면 그 시·도는 `partial` 이 된다 — 한 바퀴가 끝난 뒤
+    **미완주 지역만 다시 돌아** 빠진 페이지를 채운다(최대 `retry_rounds` 번).
+    처음부터 다시 받는 대신 이미 받은 행은 ID 로 합쳐 두므로 중복이 생기지 않는다.
+    """
+    collected: Dict[str, Dict[str, Dict[str, Any]]] = {}
     per_sido: Dict[str, int] = {}
+    page_reports: Dict[str, Any] = {}
+    pending: List[Tuple[str, str]] = list(BROSO_REGIONS)
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        future_map = {
-            pool.submit(fetch_broso_region, slug, sido, max_pages=max_pages_per_sido, today=today, timeout=timeout): (slug, sido)
-            for slug, sido in BROSO_REGIONS
-        }
-        for fut in concurrent.futures.as_completed(future_map):
-            slug, _sido = future_map[fut]
-            try:
-                rows = fut.result()
-            except Exception:
-                rows = []
-            per_sido[slug] = len(rows)
-            results.extend(rows)
+        for _round in range(max(1, int(retry_rounds) + 1)):
+            if not pending:
+                break
+            future_map = {
+                pool.submit(fetch_broso_region, slug, sido, max_pages=max_pages_per_sido,
+                            today=today, timeout=timeout, budget_s=budget_s,
+                            report=page_reports.setdefault(slug, {})): (slug, sido)
+                for slug, sido in pending
+            }
+            for fut in concurrent.futures.as_completed(future_map):
+                slug, _sido = future_map[fut]
+                try:
+                    rows = fut.result()
+                except Exception as exc:  # noqa: BLE001 - 한 지역 실패가 전체를 막지 않는다
+                    rows = []
+                    page_reports.setdefault(slug, {})["error"] = type(exc).__name__
+                bucket = collected.setdefault(slug, {})
+                for row in rows:
+                    bucket[row["서비스ID"]] = row
+                per_sido[slug] = len(bucket)
+            # 미완주(페이지 실패·시간 초과) 지역만 다시 돌려 본다.
+            pending = [(slug, sido) for slug, sido in pending
+                       if page_reports.get(slug, {}).get("partial")]
+
+    results: List[Dict[str, Any]] = []
+    for slug, _sido in BROSO_REGIONS:
+        results.extend(collected.get(slug, {}).values())
+    if reports is not None:
+        reports.update(page_reports)
     return results, per_sido
 
 
@@ -792,7 +887,7 @@ def _enrich_local_conditions(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def collect_all_local_portals(*, today: Optional[date] = None,
                               include_expired: bool = False,
-                              broso_max_pages: int = 8) -> Dict[str, Any]:
+                              broso_max_pages: int = BROSO_MAX_PAGES_DEFAULT) -> Dict[str, Any]:
     """연동된 모든 지자체 자체 복지포털 데이터를 수집·중복제거한다."""
     bupyeong = fetch_bupyeong_bokjion(max_pages=5, today=today, include_expired=include_expired)
     incheon_b = fetch_incheon_benefit(today=today, include_expired=include_expired)
@@ -800,7 +895,9 @@ def collect_all_local_portals(*, today: Optional[date] = None,
     seoul = fetch_seoul_wis(today=today)
     gg24 = fetch_gg24(max_pages=3, today=today, include_expired=include_expired)
     sejong = fetch_sejong_subsidy(today=today)
-    broso_rows, broso_counts = fetch_broso_all(max_pages_per_sido=broso_max_pages, today=today)
+    broso_pages: Dict[str, Any] = {}
+    broso_rows, broso_counts = fetch_broso_all(max_pages_per_sido=broso_max_pages, today=today,
+                                               reports=broso_pages)
 
     combined: List[Dict[str, Any]] = []
     seen_names: Set[Tuple[str, str]] = set()
@@ -822,6 +919,13 @@ def collect_all_local_portals(*, today: Optional[date] = None,
             "sejong_subsidy": len(sejong),
             "broso_total": len(broso_rows),
             "broso_by_sido": broso_counts,
+            "broso_pages": broso_pages,
+            "broso_truncated": sorted(slug for slug, info in broso_pages.items()
+                                      if isinstance(info, dict) and info.get("truncated")),
+            "broso_partial": sorted(slug for slug, info in broso_pages.items()
+                                    if isinstance(info, dict) and info.get("partial")),
+            "broso_errors": sorted(slug for slug, info in broso_pages.items()
+                                   if isinstance(info, dict) and not info.get("pages")),
             "total_deduped": len(combined),
         },
     }
