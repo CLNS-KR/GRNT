@@ -8,11 +8,13 @@
 #   드리프트를 없앱니다.
 #
 # 무엇을 커밋하나
-#   `data/gov24/catalog.json.gz` 한 파일(약 3.8MB)과 **가장 최근 기준일 스냅샷 한 장**
-#   (`data/gov24/snapshots/{날짜}.json.gz`, 약 2MB)입니다. 스냅샷은 배포 이미지에 들어가
-#   `compare_ledgers` 의 기준일이 되므로, 매일 새 기준일로 바꾸고 지난 기준일은 지워
-#   저장소가 무한히 커지지 않게 합니다(전일 대비 비교는 서버가 기동하며 만든 오늘 스냅샷과
-#   이 기준일 사이에서 나옵니다).
+#   `data/gov24/catalog.json.gz` 한 파일(약 3.8MB)과 **최근 7일치 기준일 스냅샷**
+#   (`data/gov24/snapshots/{날짜}.json.gz`, 약 2MB/일)입니다. 스냅샷은 배포 이미지에 들어가
+#   `compare_ledgers` 의 기준일이 되므로, 하루치씩 쌓아 **일자별 변화 비교가 되게** 합니다.
+#   (0.4.9 까지는 최신 1장만 남겨서 매일 '기준일 1장뿐'으로만 답했습니다.) 보관 기간을 넘긴
+#   파일은 `refresh_catalog` 가 같은 규칙으로 지우고, 이 스텝이 그 삭제를 함께 커밋합니다.
+#   `catalog.sqlite`(약 49MB)는 배포 때 압축본에서 다시 만들어지므로 기본은 커밋하지
+#   않습니다 — 매일 49MB 씩 쌓이면 1년에 1.4GB 로 저장소가 비대해집니다.
 #   `catalog.sqlite`(약 49MB)는 배포 때 압축본에서 다시 만들어지므로 기본은 커밋하지
 #   않습니다 — 매일 49MB 씩 쌓이면 1년에 1.4GB 로 저장소가 비대해집니다.
 #   그래도 인덱스 파일 자체를 저장소에 두고 싶으면 Actions 화면에서 이 워크플로를
@@ -117,13 +119,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/gov24/catalog.json.gz
-          # 기준일 스냅샷은 가장 최근 한 장만 남긴다(이전 기준일은 지우고 새 것만 -f 로 넣는다).
-          if ls data/gov24/snapshots/*.json.gz >/dev/null 2>&1; then
-            latest=$(ls -1 data/gov24/snapshots/*.json.gz | sort | tail -1)
-            for old in data/gov24/snapshots/*.json.gz; do
-              [ "$old" = "$latest" ] || rm -f "$old"
-            done
-            git add -f "$latest" data/gov24/snapshots/index.json 2>/dev/null || git add -f "$latest"
+          # 기준일 스냅샷은 최근 7일치를 남긴다. refresh_catalog 가 같은 규칙으로 이미 정리하지만,
+          # 스냅샷 단계가 실패한 실행에서도 저장소가 무한히 커지지 않게 한 번 더 확인한다.
+          if [ -d data/gov24/snapshots ]; then
+            # 최근 7일치만 남긴다(오래된 것부터 지운다). 파일이 7장 이하면 아무것도 지우지 않는다.
+            total=$(find data/gov24/snapshots -maxdepth 1 -name '*.json.gz' | wc -l)
+            if [ "$total" -gt 7 ]; then
+              find data/gov24/snapshots -maxdepth 1 -name '*.json.gz' | sort | head -n -7 | xargs -r rm -f
+            fi
+            # .gitignore 가 data/gov24/* 를 막으므로 -f 로 넣고, 삭제된 이전 날짜도 함께 반영한다.
+            git add -A -f data/gov24/snapshots
           fi
           if [ "${{ inputs.commit_sqlite }}" = "true" ]; then
             # 기본 .gitignore 가 data/gov24/* 를 막으므로 강제로 넣는다(수동 실행 전용).

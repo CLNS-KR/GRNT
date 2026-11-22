@@ -26,6 +26,7 @@
 - AI 검색 구조화 데이터(0.4.7): 홈은 Organization·WebSite(SearchAction)·WebApplication 을 `@graph` 한 덩어리로 묶어 `@id` 로 연결하고, `/s/`·`/s/{slug}` 는 CollectionPage·ItemList·BreadcrumbList 를 냅니다. robots.txt 에 OAI-SearchBot·Claude-SearchBot·Google-Extended·CCBot·Applebot-Extended 를 더하고, llms.txt 에 '구조화 데이터(JSON-LD)' 안내를 넣었습니다
 - 카탈로그 건수·랜딩 푸터 정합성(0.4.8): 지자체 자체 복지포털 병합 **뒤**의 배열에서 `meta.stats`·`meta.tracks` 를 다시 계산합니다(`catalog.stats_from_rows`). 그래서 홈·`/v1/meta` 가 옛 값(12,429)을, `/llms.txt`·`/healthz` 가 배열 값(13,416)을 말하던 모순이 없어졌습니다 — 현재 카탈로그는 **제도 13,416건(개인·가구 11,874 · 창업·기업 1,542)**. `/guides/*`·`/s/*`·`/regions/*` 푸터에 개인정보 처리방침·이용약관·서비스 소개와 자매 서비스(CLNS·FRNC) 링크를 넣고, `/regions/*` 에 `og:image`(1200×630)·`twitter:card=summary_large_image` 를 더했으며, `llms.txt` 에는 '같이 쓰는 서비스' 절을 넣었습니다. `sitemap.xml` `lastmod` 는 카탈로그 동기화일과 배포일(`version.RELEASE_DATE`) 중 최신을 씁니다
 - 담당자 이메일 마스킹(0.4.9): 공고 원문에는 기관 담당자 주소가 그대로 들어 있습니다(카탈로그 13,416건 중 1,040건, 주소 1,203곳 — `신청방법`·`전화문의`·`지원내용`·`선정기준`·`서비스목적요약`). 원문 데이터(`catalog.json.gz`·SQLite 색인·스냅샷)는 **손대지 않고**, 밖으로 나가는 출력에서만 로컬파트를 가립니다: `/s/{slug}` 26개 페이지에 그대로 실리던 260곳이 `yo***@naver.com` 꼴로 바뀌고, `/regions/*`·`/guides/*` HTML, `search_subsidies`·`list_region_subsidies`·`deadline_calendar`·`get_subsidy_detail`·`business_report` JSON/MCP 응답, 사업자 리포트 CSV, `compare_ledgers` 스냅샷 비교까지 같은 규칙을 씁니다. 도메인(기관)·소관기관명·원문 링크는 그대로라 출처 확인은 됩니다. 규칙은 `redact.py` 한 곳(로컬파트 3글자 이상 → 앞 2글자 + `***`, 1~2글자 → `*`)이고, 판정 지문은 원문으로 계산해 스냅샷 비교에 거짓 변경이 생기지 않습니다
+- 스냅샷 7일 보존·비정상 감소 경고(0.4.10): 일자별 스냅샷을 **최신 1장만** 남기던 워크플로를 **최근 7일 보존**으로 바꿔 `compare_ledgers` 가 전일 대비(추가·삭제·변경)를 실제로 계산합니다(1장만 남으면 매일 `state: baseline_only` 로만 답했습니다). 색인(`index.json`)에서도 파일이 지워진 날짜를 걷어내 기준일로 잘못 고르지 않게 했고, 기동 시 기준일 적재(`_ensure_snapshot_baseline`)는 오늘 스냅샷이 이미 있으면 덮어쓰지 않습니다(`snapshots.ensure_baseline` 멱등). 재수집으로 소스별 건수가 5%·20건 넘게 줄면 실행 요약에 경고를 남깁니다 — 2026-11-22 자동 갱신이 지자체 포털 페이지 상한에 잘려 조용히 308건 줄어든 사례를 드러내기 위해서입니다(수집 건수는 같은데 마감 제외만 늘어난 경우는 경고하지 않습니다). 또 스냅샷 날짜를 **KST**로 고정했습니다: CI 가 UTC 로 돌아 04:00 KST 갱신이 전날 파일(`2026-11-21.json.gz`)로 커밋되던 것을 바로잡았습니다
 - 검색 동의어: `keyword` 검색은 **생활어 사전**(`synonyms.py`)으로 단어를 넓혀 봅니다 — "전기세"→전기요금·가스요금, "병원비"→의료비·진료비, "배달비"→택배비·배달앱. 질의어를 그대로 담은 제도가 항상 먼저 나옵니다
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
@@ -33,8 +34,11 @@
   `data/gov24/catalog.json` 을 새로 만들면(아래 3분 실행) 그 파일이 압축본보다 우선합니다.
   압축본은 `.github/workflows/refresh-catalog.yml` 이 매일 04:00 KST 에 자동 갱신합니다(아래 4-1).
 - 저장소: <https://github.com/CLNS-KR/GRNT> · 이미지: `docker build -t grnt .`
-- 실데이터 기준(2026-11-21 라이브 `/healthz`): **제도 13,167건 — 개인·가구 11,668 · 창업·기업 1,499**
-  (정부24 보조금24 10,891 · K-Startup 196 · 기업마당 1,303 · 지자체 자체 복지포털 777, 소관기관 1,179곳).
+- 실데이터 기준(2026-11-22 04:45 자동 갱신 커밋 `00bdb8f`): **제도 13,108건 — 개인·가구 11,633 · 창업·기업 1,475**
+  (정부24 보조금24 10,892 · K-Startup 180 · 기업마당 1,295 · 지자체 자체 복지포털 741, 소관기관 1,146곳).
+  11-22 갱신에서 지자체 포털이 시·도별 페이지 상한(8페이지×10건)에 잘려 987→741건으로 줄었습니다(빠진
+  312건 중 306건이 `신청기한: 상시` 행 — 만료가 아닌 수집 누락). 다음 갱신에서 복구되지 않으므로
+  `broso_max_pages` 상향 또는 포털별 전체 페이지 순회가 필요합니다.
   숫자는 `/healthz`·`/v1/meta` 가 알려 주는 현재값이라 매일 조금씩 움직입니다.
 
 ---
@@ -531,9 +535,12 @@ PYTHONPATH=src python -m subsidy_kr.refresh_catalog --dry-run --json            
   매일 커밋이 생기는 일을 막습니다).
 - 종료코드: `0` = 갱신 또는 인덱스 재생성 완료(부분 실패 포함), `1` = 쓸 카탈로그가 없음.
 - `.github/workflows/refresh-catalog.yml` 이 매일 `0 19 * * *` UTC(04:00 KST)에 돌고,
-  바뀐 `data/gov24/catalog.json.gz` 만 커밋합니다(`contents: write`). `catalog.sqlite`(49MB)는
-  기본 커밋하지 않습니다 — 배포 때 압축본에서 다시 만들어지고, 매일 쌓으면 저장소가 1년에
-  약 1.4GB 커집니다. 필요하면 워크플로를 수동 실행하며 `commit_sqlite` 를 켜면 됩니다.
+  바뀐 `data/gov24/catalog.json.gz` 와 **최근 7일치 기준일 스냅샷**(`data/gov24/snapshots/*.json.gz`, 0.4.10 —
+  예전엔 최신 1장만 남겨 `compare_ledgers` 가 매일 `baseline_only` 로만 답했다)을 커밋합니다(`contents: write`).
+  스냅샷 날짜는 KST 기준으로 적습니다(CI 가 UTC 라 04:00 KST 갱신이 전날 파일로 커밋되던 것을 0.4.10 에서 바로잡았습니다).
+  재수집으로 소스별 건수가 5%·20건 넘게 줄면 실행 요약·카탈로그 `meta.warnings` 에 감소 경고를 남깁니다(마감 제외로
+  설명되는 감소는 경고하지 않습니다). `catalog.sqlite`(49MB)는 기본 커밋하지 않습니다 — 배포 때 압축본에서 다시 만들어지고,
+  매일 쌓으면 저장소가 1년에 약 1.4GB 커집니다. 필요하면 워크플로를 수동 실행하며 `commit_sqlite` 를 켜면 됩니다.
 
 ---
 
@@ -693,7 +700,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.9` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.10` 태그로 게시합니다.
 
 ## 9. 라이선스
 

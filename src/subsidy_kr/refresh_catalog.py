@@ -42,7 +42,6 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import programs, snapshots, sync_gov24
@@ -53,6 +52,62 @@ CATALOG_FILE = "catalog.json"
 GZIP_FILE = "catalog.json.gz"
 INDEX_FILE = "catalog.sqlite"
 ALL_SOURCES = ("gov24", "startup", "bizinfo")
+
+# 재수집으로 카탈로그가 눈에 띄게 줄 때 요약에 경고를 남기는 기준.
+#   마감 공고 제외는 정상이지만, 지자체 포털 페이지 상한에 잘리거나 포털 개편으로 일부만
+#   받아진 경우도 같은 모양으로 줄어든다. 그때 조용힐 넘기면 다음 갱신에서도 복구되지
+#   않으므로(이미 빠진 행은 '기존 유지' 대상이 아니다) 실행 요약에 남긴다.
+SHRINK_SOURCE_LABELS = {"gov24": "보조금24", "kstartup": "K-Startup",
+                        "bizinfo": "기업마당", "local_portal": "지자체 포털"}
+SHRINK_RATIO = 0.05
+SHRINK_MIN_ITEMS = 20
+
+
+def _expiry_explained(source: str, before_meta: Dict[str, Any], after_meta: Dict[str, Any],
+                      drop: int) -> bool:
+    """줄어든 양이 마감 제외로 설명되는지(`meta.sources` 의 `dropped_expired` 증가).
+
+    K-Startup·기업마당은 수집 건수(`fetched`)가 같고 `dropped_expired` 가 그만큼 늘었으면
+    정상 만료 제외다 — 서비스는 살아 있는데 공고가 마감된 경우라 경고할 필요가 없다.
+    수집 건수 자체가 줄었으면 원본 창이 줄었거나 페이지가 잘린 것이라 경고한다.
+    """
+    key = {"kstartup": "startup", "bizinfo": "bizinfo"}.get(source)
+    if not key:
+        return False
+    before = ((before_meta or {}).get("sources") or {}).get(key) or {}
+    after = ((after_meta or {}).get("sources") or {}).get(key) or {}
+    if before.get("fetched") is None or after.get("fetched") is None:
+        return False
+    if int(before.get("fetched") or 0) != int(after.get("fetched") or 0):
+        return False
+    grown = int(after.get("dropped_expired") or 0) - int(before.get("dropped_expired") or 0)
+    return grown >= drop
+
+
+def _shrink_warnings(before: Dict[str, Any], after: Dict[str, Any],
+                     before_meta: Optional[Dict[str, Any]] = None,
+                     after_meta: Optional[Dict[str, Any]] = None) -> List[str]:
+    """소스별 건수가 5% 이상∙20건 이상 줄면 이유를 밝히도록 경고를 만든다."""
+    if not before or not after:
+        return []
+    old = before.get("by_source") or {}
+    new = after.get("by_source") or {}
+    lines: List[str] = []
+    for source, label in SHRINK_SOURCE_LABELS.items():
+        previous = int(old.get(source) or 0)
+        current = int(new.get(source) or 0)
+        if previous <= 0 or current >= previous:
+            continue
+        drop = previous - current
+        if drop < SHRINK_MIN_ITEMS or drop / previous < SHRINK_RATIO:
+            continue
+        if _expiry_explained(source, before_meta or {}, after_meta or {}, drop):
+            continue
+        lines.append(
+            f"{label} {previous:,}건 → {current:,}건({drop:,}건 감소, {drop / previous:.1%}). "
+            "마감 제외가 아닌 수집 누락이라면 다음 갱신에서도 복구되지 않으니 원본 응답을 확인하세요."
+        )
+    return lines
 
 
 def _log(message: str) -> None:
@@ -127,7 +182,7 @@ def rebuild_index(root: str, payload: Dict[str, Any],
     meta = dict(payload.get("meta") or {})
     meta["catalog_state"] = "synced"
     meta.setdefault("data_state", "live_sync")
-    meta["index_built_on"] = date.today().isoformat()
+    meta["index_built_on"] = snapshots.today_kst()
     build_sqlite_from_rows(rows, meta, paths["index"])
     log(f"인덱스 재생성: {paths['index']} ({len(rows):,}건)")
     return index_counts(paths["index"])
@@ -169,13 +224,13 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
             dry_run: bool = False, compress: bool = True, ttl_hours: float = 0.0,
             grace_days: int = 30, max_pages: Optional[int] = None,
             delay: float = 0.0, include_local_portals: bool = True,
-            broso_max_pages: int = 8,
+            broso_max_pages: int = 8, keep_days: int = snapshots.KEEP_DAYS,
             log: Callable[[str], None] = _log) -> Dict[str, Any]:
     """재수집 → 만료 인덱스 재생성 → (바뀐 경우) 압축본 갱신. 결과 요약을 돌려준다."""
     root = data_dir or default_data_dir()
     paths = _paths(root)
     warnings: List[str] = []
-    today = date.today().isoformat()
+    today = snapshots.today_kst()  # CI(UTC)에서도 04:00 KST 갱신이 그날 날짜로 남게
 
     # dry-run 은 "지금 있는 카탈로그로 무엇이 바뀔지"만 본다 — 네트워크·파일 쓰기를 모두 하지 않는다.
     if dry_run:
@@ -183,6 +238,10 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
 
     before_json_sha = _file_sha(paths["json"])
     before_counts = index_counts(paths["index"])
+    # 재수집 **전** 카탈로그의 소스별 건수 — 재수집 뒤와 비교해 비정상 감소를 경고한다.
+    before_payload, _before_path = read_payload(root)
+    before_rows = [row for row in (before_payload.get("services") or []) if isinstance(row, dict)]
+    before_stats = stats_from_rows(before_rows) if before_rows else {}
 
     sync_report: Dict[str, Any] = {"ok": False, "state": "skipped",
                                    "message": "offline"}
@@ -218,11 +277,19 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
     # meta.stats·meta.tracks 를 **행 배열과 다시 맞춘다**. 재수집이 실패해 기존 카탈로그로
     # 끝난 실행(CI 에 키가 없을 때의 --offline 포함)이 병합 뒤 건수와 어긋난 옛 값을
     # 압축본에 그대로 다시 쓰던 문제를 막는다(지자체 포털 병합 뒤 홈 12,429 vs llms 13,416).
+    stats: Dict[str, Any] = {}
     if rows:
         stats = stats_from_rows(rows)
         meta = dict(payload.get("meta") or {})
         meta["stats"] = stats
         meta["tracks"] = stats["by_track"]
+        # 경고는 **이번 실행 기준으로 다시 쓴다**. 재수집 단계가 남긴 경고(부분 실패·기존 유지)는
+        # 그대로 두고, 지난 실행의 낡은 경고는 싣지 않는다(매일 커밋만 늘어난다).
+        carried = [w for w in (meta.get("warnings") or []) if w not in warnings]
+        warnings.extend(carried)
+        warnings.extend(_shrink_warnings(before_stats, stats,
+                                         before_payload.get("meta") or {}, meta))
+        meta["warnings"] = list(dict.fromkeys(warnings))
         payload["meta"] = meta
     result: Dict[str, Any] = {
         "ok": True,
@@ -234,8 +301,7 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
         "catalog": {"source_file": os.path.basename(source_path or ""),
                     "services": len(rows), **_snapshot_note(payload)},
         "sources": sync_report,
-        "warnings": warnings + [w for w in (payload.get("meta") or {}).get("warnings") or []
-                                if w not in warnings],
+        "warnings": list(dict.fromkeys(warnings)),
     }
 
     after_counts: Dict[str, Any] = {}
@@ -260,6 +326,7 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
     # 카탈로그 상태를 한 장 남긴다. `compare_ledgers` 는 이 파일이 있어야 동작하고,
     # `snapshots/` 는 저장소·이미지에 함께 넣어 두므로(압축본) 배포 환경도 기준일을 갖는다.
     snapshot_written: Optional[str] = None
+    snapshot_pruned: Dict[str, Any] = {}
     if not dry_run:
         try:
             # sync_gov24 와 같은 규칙으로 정규화한다 — 서비스ID 중복은 마지막 행,
@@ -278,6 +345,14 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
                 services, today, snapshots.snapshot_dir(root), compress=True,
                 note_ko="카탈로그 갱신 시 적재한 일자별 스냅샷입니다.")
             log(f"스냅샷: {snapshot_written}")
+            # 보관 기간을 넘긴 스냅샷 파일·색인 행을 정리한다(기본 7일). 오늘 것은 항상 남긴다.
+            snapshot_pruned = snapshots.prune_snapshots(
+                snapshots.snapshot_dir(root), keep_days=max(1, int(keep_days or 1)),
+                protect=today)
+            if snapshot_pruned.get("removed_days"):
+                log(f"스냅샷 정리: {len(snapshot_pruned['removed_days'])}일 제거"
+                    f"(보관 {snapshot_pruned.get('keep_days', 0)}일, "
+                    f"남음 {len(snapshot_pruned.get('kept_days') or [])}일)")
         except (OSError, ValueError, TypeError) as exc:
             warnings.append(f"스냅샷 적재 실패({type(exc).__name__})")
 
@@ -304,8 +379,11 @@ def refresh(service_key: Optional[str] = None, *, data_dir: Optional[str] = None
                       ([paths["gzip"]] if gzip_written else []) + \
                       ([snapshot_written] if snapshot_written else [])
     result["snapshot"] = {"path": snapshot_written, "day": today,
+                          "keep_days": int(snapshot_pruned.get("keep_days") or keep_days or 0),
                           "available_days": len(snapshots.list_snapshots(
-                              snapshots.snapshot_dir(root)))}
+                              snapshots.snapshot_dir(root))),
+                          "days": snapshot_pruned.get("kept_days") or [],
+                          "pruned_days": snapshot_pruned.get("removed_days") or []}
     return result
 
 
@@ -333,7 +411,8 @@ def _human_report(report: Dict[str, Any]) -> str:
         lines.append(f"  경고: {warning}")
     snapshot = report.get("snapshot") or {}
     if snapshot.get("path"):
-        lines.append(f"  스냅샷: {snapshot.get('path')} (보관 {snapshot.get('available_days', 0)}일)")
+        lines.append(f"  스냅샷: {snapshot.get('path')} (보관 {snapshot.get('available_days', 0)}일"
+                     f" / 최대 {snapshot.get('keep_days', 0)}일)")
     return "\n".join(lines)
 
 
@@ -359,6 +438,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="마감 후 이 기간이 지난 공고는 수집에서 제외")
     parser.add_argument("--max-pages", type=int, default=0, help="페이지 제한(시험용, 0=전량)")
     parser.add_argument("--delay", type=float, default=0.0, help="호출 간 대기(초)")
+    parser.add_argument("--keep-days", type=int, default=snapshots.KEEP_DAYS,
+                        help=f"스냅샷 보관 일수(기본 {snapshots.KEEP_DAYS}일 = compare_ledgers 일자별 비교)")
     parser.add_argument("--json", action="store_true", help="요약을 JSON 으로 출력")
     args = parser.parse_args(argv)
 
@@ -385,6 +466,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_pages=int(args.max_pages) or None,
         delay=max(0.0, float(args.delay)),
         include_local_portals=not args.no_local,
+        keep_days=max(1, int(args.keep_days)),
         log=(lambda message: None) if args.json else _log,
     )
     if args.json:

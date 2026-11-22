@@ -21,10 +21,10 @@ from __future__ import annotations
 import gzip
 import json
 import os
-from datetime import date
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
-from .cache import now_iso
+from .cache import KST, now_iso
 from .catalog import data_dir_from_env
 from .redact import mask_object
 
@@ -32,6 +32,11 @@ SNAPSHOT_DIRNAME = "snapshots"
 INDEX_FILE = "index.json"
 SNAPSHOT_SUFFIX = ".json"
 GZIP_SUFFIX = ".json.gz"
+# 저장소·배포 이미지에 남기는 일자별 스냅샷 장수.
+#   `compare_ledgers` 는 두 날짜를 비교하므로 2장이면 되지만, 하루치 수집이 실패한 날에도
+#   그 전날과 비교할 수 있게 7일을 남긴다(하루 약 2MB × 7 = 14MB). 예전에는 최신 1장만
+#   남겨서 매일 "기준일 1장뿐(baseline_only)"으로만 답했다.
+KEEP_DAYS = 7
 DIFF_FIELDS: List[str] = ["name", "agency", "field", "deadline_end", "deadline_text",
                           "amount", "target", "recruiting", "track"]
 
@@ -42,7 +47,13 @@ def snapshot_dir(data_dir: Optional[str] = None) -> str:
 
 
 def today_kst() -> str:
-    return date.today().isoformat()
+    """한국시간 기준 오늘(YYYY-MM-DD).
+
+    CI(GitHub Actions)는 UTC 로 돌아가므로 `date.today()` 를 쓰면 04:00 KST 갱신이
+    **전날 날짜** 스냅샷으로 남는다(2026-11-22 04:45 실행이 `2026-11-21.json.gz` 를
+    커밋한 실제 사례). 카탈로그 `meta.snapshot_day` 와 파일 날짜가 어깋지지 않게 KST 로 고정한다.
+    """
+    return datetime.now(KST).strftime("%Y-%m-%d")
 
 
 def _clip(value: Any, limit: int) -> str:
@@ -188,7 +199,9 @@ def list_snapshots(directory: Optional[str] = None) -> List[Dict[str, Any]]:
     index = _read_index(root)
     rows: Dict[str, Dict[str, Any]] = {}
     for row in index.get("days") or []:
-        if isinstance(row, dict) and row.get("day"):
+        # 파일이 지워진 날짜의 색인 행은 목록에서 뺀다 — 남겨 두면 `compare_days` 가
+        # 읽을 수 없는 날짜를 기준일로 골라 `snapshot_missing` 으로 비어 버린다.
+        if isinstance(row, dict) and row.get("day") and _path_for(str(row["day"]), root):
             rows[str(row["day"])] = row
     # 색인에 없는 날짜(저장소에 함께 커밋한 압축 스냅샷 등)는 파일 메타로 채운다.
     for day in days_on_disk(root):
@@ -215,7 +228,66 @@ def _read_index(root: str) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {"days": []}
 
 
+def _prune_index(root: str) -> List[str]:
+    """파일이 사라진 날짜의 색인 행을 지운다(남은 날짜만 다시 쓴다)."""
+    index = _read_index(root)
+    kept: List[Dict[str, Any]] = []
+    removed: List[str] = []
+    for row in index.get("days") or []:
+        if not isinstance(row, dict) or not row.get("day"):
+            continue
+        day = str(row["day"])
+        if _path_for(day, root):
+            kept.append(row)
+        else:
+            removed.append(day)
+    if not removed:
+        return []
+    tmp = os.path.join(root, INDEX_FILE + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump({"days": kept}, handle, ensure_ascii=False)
+    os.replace(tmp, os.path.join(root, INDEX_FILE))
+    return sorted(removed)
+
+
+def prune_snapshots(directory: Optional[str] = None, keep_days: int = KEEP_DAYS, *,
+                    protect: Optional[str] = None) -> Dict[str, Any]:
+    """최근 `keep_days` 일치만 남기고 오래된 스냅샷 파일·색인 행을 지운다.
+
+    지우는 대상은 **디스크에 있는 날짜**뿐입니다(색인에만 남은 유령 날짜는 색인에서 정리).
+    `protect` 에 오늘 날짜를 주면 그 날짜는 순서와 무관하게 남깁니다 — 과거 날짜 스냅샷을
+    나중에 복원한 경우에도 오늘 관측분을 잃지 않게 하기 위해서입니다.
+    """
+    root = directory or snapshot_dir()
+    keep = max(1, int(keep_days or 1))
+    days = days_on_disk(root)
+    keep_set = set(days[-keep:]) if days else set()
+    if protect:
+        keep_set.add(str(protect))
+    removed_days: List[str] = []
+    removed_files: List[str] = []
+    for day in days:
+        if day in keep_set:
+            continue
+        for suffix in (SNAPSHOT_SUFFIX, GZIP_SUFFIX):
+            path = os.path.join(root, f"{day}{suffix}")
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    removed_files.append(path)
+            except OSError:
+                continue
+        removed_days.append(day)
+    index_removed = _prune_index(root)
+    return {"keep_days": keep,
+            "kept_days": days_on_disk(root),
+            "removed_days": removed_days,
+            "removed_files": removed_files,
+            "index_removed": index_removed}
+
+
 def _update_index(root: str, day: str, payload: Dict[str, Any]) -> None:
+    _prune_index(root)  # 파일이 사라진 날짜를 먼저 걷어낸다(그 날짜를 직전으로 고르지 않게)
     index = _read_index(root)
     days = [row for row in (index.get("days") or [])
             if isinstance(row, dict) and str(row.get("day")) != day]
