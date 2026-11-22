@@ -25,6 +25,7 @@
 - 거래처 매칭 정교화(0.4.7): 익명 CSV 에 `industry_keyword`(세부 업종·취급품목)·`entity`(기업 형태, 소상공인여부 Y/N 포함)·`employment`(청년·고령·육아휴직·장애인·사회보험료)·`employees_bracket`(5인 미만)·`founded_year`(설립연도) 열을 더 받습니다. 거래처마다 **탈락 사유**(지역·업력·연령·업종·기업 형태·상위 후보 밖)를 사유별로 세고, 결과 1건마다 엔진 판정에서 온 **판정 근거**를 붙입니다. 고용 이슈는 '청년일자리'·'시니어인턴십'처럼 고용 지원을 뜻하는 결합 표현만 잡습니다('고령군' 같은 지역명 오탐 방지)
 - AI 검색 구조화 데이터(0.4.7): 홈은 Organization·WebSite(SearchAction)·WebApplication 을 `@graph` 한 덩어리로 묶어 `@id` 로 연결하고, `/s/`·`/s/{slug}` 는 CollectionPage·ItemList·BreadcrumbList 를 냅니다. robots.txt 에 OAI-SearchBot·Claude-SearchBot·Google-Extended·CCBot·Applebot-Extended 를 더하고, llms.txt 에 '구조화 데이터(JSON-LD)' 안내를 넣었습니다
 - 카탈로그 건수·랜딩 푸터 정합성(0.4.8): 지자체 자체 복지포털 병합 **뒤**의 배열에서 `meta.stats`·`meta.tracks` 를 다시 계산합니다(`catalog.stats_from_rows`). 그래서 홈·`/v1/meta` 가 옛 값(12,429)을, `/llms.txt`·`/healthz` 가 배열 값(13,416)을 말하던 모순이 없어졌습니다 — 현재 카탈로그는 **제도 13,416건(개인·가구 11,874 · 창업·기업 1,542)**. `/guides/*`·`/s/*`·`/regions/*` 푸터에 개인정보 처리방침·이용약관·서비스 소개와 자매 서비스(CLNS·FRNC) 링크를 넣고, `/regions/*` 에 `og:image`(1200×630)·`twitter:card=summary_large_image` 를 더했으며, `llms.txt` 에는 '같이 쓰는 서비스' 절을 넣었습니다. `sitemap.xml` `lastmod` 는 카탈로그 동기화일과 배포일(`version.RELEASE_DATE`) 중 최신을 씁니다
+- 담당자 이메일 마스킹(0.4.9): 공고 원문에는 기관 담당자 주소가 그대로 들어 있습니다(카탈로그 13,416건 중 1,040건, 주소 1,203곳 — `신청방법`·`전화문의`·`지원내용`·`선정기준`·`서비스목적요약`). 원문 데이터(`catalog.json.gz`·SQLite 색인·스냅샷)는 **손대지 않고**, 밖으로 나가는 출력에서만 로컬파트를 가립니다: `/s/{slug}` 26개 페이지에 그대로 실리던 260곳이 `yo***@naver.com` 꼴로 바뀌고, `/regions/*`·`/guides/*` HTML, `search_subsidies`·`list_region_subsidies`·`deadline_calendar`·`get_subsidy_detail`·`business_report` JSON/MCP 응답, 사업자 리포트 CSV, `compare_ledgers` 스냅샷 비교까지 같은 규칙을 씁니다. 도메인(기관)·소관기관명·원문 링크는 그대로라 출처 확인은 됩니다. 규칙은 `redact.py` 한 곳(로컬파트 3글자 이상 → 앞 2글자 + `***`, 1~2글자 → `*`)이고, 판정 지문은 원문으로 계산해 스냅샷 비교에 거짓 변경이 생기지 않습니다
 - 검색 동의어: `keyword` 검색은 **생활어 사전**(`synonyms.py`)으로 단어를 넓혀 봅니다 — "전기세"→전기요금·가스요금, "병원비"→의료비·진료비, "배달비"→택배비·배달앱. 질의어를 그대로 담은 제도가 항상 먼저 나옵니다
 - API 키 없이 동작: 저장소에는 원본 동기화 산출물(25MB) 대신 **압축본 `data/gov24/catalog.json.gz`(약 3.8MB)** 만 둡니다.
   로더는 `catalog.json` 이 있으면 그것을, 없으면 `catalog.json.gz` 를 읽습니다 — 그래서 클론·이미지·Render 가
@@ -630,7 +631,8 @@ subsidy-kr/                                     (패키지 경로는 그대로, 
 
 공고문 원문에 포함된 **기관 담당자 이메일·전화**는 공개된 기관 연락처로, 사용자 개인정보와 다릅니다.
 `src/`·문서·설정에는 이메일·전화·실명을 쓰지 않으며 테스트가 이를 검사합니다.
-다만 그 연락처가 담긴 동기화 산출물(`data/gov24/`)은 저장소·이미지에 넣지 않습니다.
+원문에 섞인 담당자 이메일은 **화면·JSON·CSV 로 나가는 자리에서 로컬파트만 가려** 내보냅니다
+(0.4.9 — `redact.py`. 도메인·기관명·출처 링크는 그대로). 카탈로그 파일 자체는 원문 보존입니다.
 
 검색어는 **결과가 0건일 때만** 남깁니다 — 결과가 있던 검색어는 저장하지 않습니다. 남길 때도
 숫자(나이·연도)·전화번호·주민번호·이메일·URL·@핸들과 시·도/시·군·구 이름을 지우고 30자로
@@ -691,7 +693,7 @@ curl -s localhost:8787/g1.html
 
 `server.json` 의 `name`(`io.github.CLNS-KR/grnt`)·`repository` 는 실제 GitHub 소유자
 (`CLNS-KR/GRNT`)에 맞춰 두었고, 공개 주소(`websiteUrl`·`remotes`)는 `https://grnt-kr.onrender.com` 입니다.
-MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.8` 태그로 게시합니다.
+MCP Registry 는 그 주소의 `/healthz` 가 살아 있는 것을 확인한 뒤 `v0.4.9` 태그로 게시합니다.
 
 ## 9. 라이선스
 

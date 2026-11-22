@@ -3,7 +3,7 @@
   "name": "io.github.CLNS-KR/grnt",
   "title": "GRNT — Korean Grant & Subsidy Intelligence",
   "description": "Korean grant and startup-funding eligibility checks with official reasons and sources.",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "websiteUrl": "https://grnt-kr.onrender.com/",
   "repository": {
     "url": "https://github.com/CLNS-KR/GRNT",

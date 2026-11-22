@@ -16,6 +16,7 @@ from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
 
+from .redact import mask_emails
 from .regions_data import SIGUNGU_BY_SIDO as _RAW_SIGUNGU_BY_SIDO
 
 # 지역 택소노미 버전 — 개편으로 이름·구성이 바뀌면 올린다.
@@ -820,9 +821,11 @@ def _page(title: str, description: str, body: str, canonical_path: str,
 
 
 def _service_row(svc: Any) -> str:
+    name = mask_emails(svc.name)
+    agency = mask_emails(svc.agency) or "소관기관 미기재"
     deadline = getattr(svc, "deadline", {}) or {}
     label = deadline.get("label_ko") or svc.deadline_text or "신청기한 미기재"
-    label = _clip(label, 44)
+    label = mask_emails(_clip(label, 44))
     days = deadline.get("days_left")
     soon = ("" if not isinstance(days, int) or days > SOON_DAYS
             else f' <span class="badge check_needed">D-{days}</span>' if days > 0
@@ -832,7 +835,7 @@ def _service_row(svc: Any) -> str:
         region_label = ""
     meta = " · ".join(part for part in (
         "창업·기업" if svc.is_business else "개인·가구",
-        svc.agency or "소관기관 미기재",
+        agency,
         svc.field_label,
         region_label,
     ) if part)
@@ -842,14 +845,16 @@ def _service_row(svc: Any) -> str:
                 f'target="_blank">{"공고 상세" if svc.is_business else "정부24 상세"}</a></div>')
     criteria = ("" if svc.has_criteria or svc.is_business
                 else ' <span class="pill ghost">선정기준 원문 미기재 · 확인 필요</span>')
-    amount = f'<p class="amount">{_esc(_clip(svc.content))}</p>' if svc.content else ""
+    amount = (f'<p class="amount">{_esc(mask_emails(_clip(svc.content)))}</p>'
+              if svc.content else "")
     return (
         '<div class="result">'
-        f'<div class="result-head"><div><h4>{_esc(svc.name)}</h4>'
+        f'<div class="result-head"><div><h4>{_esc(name)}</h4>'
         f'<p class="meta">{_esc(meta)}</p></div>'
         f'<span class="deadline-pill{" soon" if soon else ""}">{_esc(label)}{soon}</span></div>'
         + amount
-        + f'<p class="meta">접수·문의: {_esc(_clip(svc.contact, 60)) or "미기재"}{criteria}</p>'
+        + f'<p class="meta">접수·문의: '
+          f'{_esc(mask_emails(_clip(svc.contact, 60))) or "미기재"}{criteria}</p>'
         + link
         + "</div>"
     )

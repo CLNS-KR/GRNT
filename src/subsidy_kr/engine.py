@@ -29,7 +29,7 @@ from collections import OrderedDict
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import conditions, models, programs, regions, synonyms
+from . import conditions, models, programs, redact, regions, synonyms
 from .catalog import Catalog, Service, browse_sort_key
 
 PASS = "pass"
@@ -972,7 +972,9 @@ def evaluate_service(service: Service, profile: Dict[str, Any],
         result["notes_ko"].append(
             "이 제도의 금액·기한은 내장 샘플 값입니다. 실제 값은 원문과 소관기관 안내를 확인하세요."
         )
-    return result
+    # 화면·API·리포트로 나가는 행이다. 담당자 이메일은 여기서 한 번에 가린다
+    # (원문 카탈로그·스냅샷 지문은 그대로 두고, 밖으로 나가는 문장만 줄인다).
+    return redact.mask_object(result)
 
 
 def _profile_is_empty(profile: Dict[str, Any]) -> bool:

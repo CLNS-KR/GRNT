@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .cache import now_iso
 from .catalog import data_dir_from_env
+from .redact import mask_object
 
 SNAPSHOT_DIRNAME = "snapshots"
 INDEX_FILE = "index.json"
@@ -280,14 +281,14 @@ def diff_snapshots(before: Dict[str, Any], after: Dict[str, Any],
     changed.sort(key=lambda row: (str(row.get("track")), str(row.get("name"))))
     if limit is not None and limit > 0:
         added, removed, changed = added[:limit], removed[:limit], changed[:limit]
-    return {
+    return mask_object({
         "from_day": (before.get("meta") or {}).get("day"),
         "to_day": (after.get("meta") or {}).get("day"),
         "added": added,
         "removed": removed,
         "changed": changed,
         "counts": {"added": len(added), "removed": len(removed), "changed": len(changed)},
-    }
+    })
 
 
 def compare_days(day_a: Optional[str], day_b: Optional[str],

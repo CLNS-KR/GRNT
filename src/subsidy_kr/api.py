@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from . import (agent_report, batch_client, conditions, engine, guides, local_portals, models,
-               programs, regions, snapshots, synonyms, usage)
+               programs, redact, regions, snapshots, synonyms, usage)
 from .catalog import Catalog
 from .version import __version__
 
@@ -299,6 +299,8 @@ def tool_list_region_subsidies(args: Dict[str, Any], catalog: Catalog, store: An
             "source": svc.source,
             "data_state": svc.source,
         })
+    # 원문 문장(지원대상·내용·문의처)에 담긴 담당자 이메일은 응답을 만들 때 가린다.
+    rows = [redact.mask_object(row) for row in rows]
     payload: Dict[str, Any] = {
         "region": block,
         "track": track,
@@ -399,6 +401,9 @@ def tool_deadline_calendar(args: Dict[str, Any], catalog: Catalog,
             "contact": svc.contact,
             "source": svc.source,
         })
+    for day_rows in by_day.values():
+        for row in day_rows:
+            redact.mask_fields(row, ("name", "agency", "deadline_text", "contact"))
     weekdays = ["월", "화", "수", "목", "금", "토", "일"]
     calendar: List[Dict[str, Any]] = []
     total = 0

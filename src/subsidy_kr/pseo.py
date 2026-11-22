@@ -15,7 +15,7 @@ import html
 import json
 
 from .catalog import Catalog, tag_label
-from . import regions, site_verification
+from . import redact, regions, site_verification
 
 MIN_INDEX_ITEMS = 5
 # 페이지 머리의 브랜드 문구는 h1 이 아니라 p 로, h1 은 페이지 주제에 쓴다(검색엔진이 제목을 고를 때
@@ -191,7 +191,7 @@ def json_ld_blocks(page: Dict[str, Any], canonical: str, services: List[Any],
     목록 항목은 화면에 그린 순서 그대로 앞 10건만 넣는다(화면과 구조화 데이터를 맞춘다).
     """
     items = [
-        {"@type": "ListItem", "position": index, "name": str(svc.name),
+        {"@type": "ListItem", "position": index, "name": redact.mask_emails(str(svc.name)),
          "url": (svc.detail_url or svc.online_url or canonical)}
         for index, svc in enumerate(services[:10], start=1)
     ]
@@ -283,10 +283,17 @@ def _clip(value: Any, limit: int = 180) -> str:
     text = " ".join(str(value or "").split())
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
-
 def _service_rows(services: List[Any]) -> str:
     rows = []
     for svc in services[:MAX_ROWS_PER_PAGE]:
+        # 원문에 담당자 이메일이 섞여 있어도 화면에는 가려서 내보낸다.
+        name = redact.mask_emails(svc.name)
+        agency = redact.mask_emails(svc.agency)
+        content = redact.mask_emails(_clip(svc.content)) if svc.content else ""
+        target = redact.mask_emails(_clip(svc.target)) or "원문 확인"
+        deadline_text = redact.mask_emails(_clip(svc.deadline_text, 80)) or "미기재"
+        contact = redact.mask_emails(_clip(svc.contact, 60)) or "미기재"
+        business_summary = redact.mask_emails(svc.business_summary_text)
         criteria_note = ""
         if not svc.has_criteria and not svc.is_business:
             criteria_note = ' <span class="pill ghost">선정기준 원문 미기재 · 확인 필요</span>'
@@ -295,19 +302,19 @@ def _service_rows(services: List[Any]) -> str:
         if region_label == svc.agency or svc.region.get("level") == "national":
             region_label = ""
         track_badge = "창업·기업" if svc.is_business else "개인·가구"
-        business_line = (f'<p class="meta">신청자격: {svc.business_summary_text}</p>'
-                         if svc.business_summary_text else "")
+        business_line = (f'<p class="meta">신청자격: {business_summary}</p>'
+                         if business_summary else "")
         rows.append(
             '<div class="result">'
-            f'<div class="result-head"><div><h4>{svc.name}</h4>'
-            f'<p class="meta">{track_badge} · {svc.agency} · {tag}'
+            f'<div class="result-head"><div><h4>{name}</h4>'
+            f'<p class="meta">{track_badge} · {agency} · {tag}'
             f'{" · " + region_label if region_label else ""}</p></div>'
             f'<span class="badge check_needed">{svc.field_label}</span></div>'
-            + (f'<p class="amount">{_clip(svc.content)}</p>' if svc.content else "")
+            + (f'<p class="amount">{content}</p>' if content else "")
             + business_line
-            + f'<p class="meta">대상: {_clip(svc.target) or "원문 확인"}</p>'
-            + f'<p class="meta">신청기한: {_clip(svc.deadline_text, 80) or "미기재"} · '
-              f'문의: {_clip(svc.contact, 60) or "미기재"}'
+            + f'<p class="meta">대상: {target}</p>'
+            + f'<p class="meta">신청기한: {deadline_text} · '
+              f'문의: {contact}'
             + criteria_note + "</p>"
             + (f'<div class="links"><a href="{svc.detail_url}" rel="noopener noreferrer" '
                f'target="_blank">{"공고 상세" if svc.is_business else "정부24 상세"}</a></div>'

@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import conditions, deadlines, programs, regions, sample_data, sample_programs, synonyms
+from . import conditions, deadlines, programs, redact, regions, sample_data, sample_programs, synonyms
 
 # 프로필 없는 둘러보기 결과(건수+종류별 상위 목록)를 몇 조합까지 기억할지 — 작은 요약이라
 # 6개만 둔다(지역·트랙·마감 조합이 바뀌어도 메모리가 늘지 않는다).
@@ -293,7 +293,8 @@ class Service:
                 "business_summary_ko": self.business_summary_text,
                 "fingerprint": self.fingerprint,
             })
-        return block
+        # 밖으로 나가는 요약이므로 담당자 이메일은 여기서 가린다(원문 데이터는 그대로).
+        return redact.mask_object(block)
 
 
 def _text(raw: Dict[str, Any], *keys: str, default: str = "") -> str:

@@ -25,6 +25,8 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
+from .redact import mask_emails
+
 SERVICE_NAME = "GRNT"
 INDEX_PATH = "/guides/"
 DISCLAIMER_KO = "지원금·자격은 최종 공고문과 주관기관 확인이 필요합니다."
@@ -2155,6 +2157,7 @@ def _service_rows(rows: List[Any]) -> str:
     for svc in rows:
         deadline = svc.deadline or {}
         label = deadline.get("label_ko") or svc.deadline_text or "신청기한 미기재"
+        label = mask_emails(label)
         days_left = deadline.get("days_left")
         soon = ""
         if isinstance(days_left, int) and 0 <= days_left <= 7:
@@ -2166,8 +2169,8 @@ def _service_rows(rows: List[Any]) -> str:
                     f'target="_blank">{"공고 상세" if svc.is_business else "정부24 상세"}</a></div>')
         out.append(
             '<div class="result" style="padding:12px 14px">'
-            f'<div class="result-head"><div><h4>{_esc(svc.name)}</h4>'
-            f'<p class="meta">{track} · {_esc(svc.agency or "소관기관 미기재")} · '
+            f'<div class="result-head"><div><h4>{_esc(mask_emails(svc.name))}</h4>'
+            f'<p class="meta">{track} · {_esc(mask_emails(svc.agency or "소관기관 미기재"))} · '
             f'{_esc(svc.field_label)}</p></div>'
             f'<span class="deadline-pill{" soon" if soon else ""}">{_esc(label)}{soon}</span></div>'
             + link + "</div>"
